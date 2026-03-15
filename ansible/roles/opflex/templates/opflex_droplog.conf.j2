@@ -1,0 +1,17 @@
+{
+    "drop-log-config-sources": {
+        "filesystem": ["/var/lib/opflex-agent-ovs/droplog"]
+    },
+    "renderers": {
+        "openvswitch": {
+            "drop-log": {
+                "geneve": {
+                    "int-br-iface": "droplog_geneve0",
+                    "access-br-iface": "droplog_geneve1",
+                    "remote-ip": "127.0.0.1",
+                    "local-port": 50000
+                }
+            }
+        }
+    }
+}

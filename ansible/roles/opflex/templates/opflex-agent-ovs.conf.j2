@@ -1,0 +1,67 @@
+{
+    "log": {
+        "level": "{{ opflex_agent_ovs_log_level }}"
+    },
+    "opflex": {
+        "domain": "{{ opflex_domain }}",
+        "name": "{{ opflex_agent_name }}",
+        "peers": [
+            {
+                "hostname": "{{ opflex_peer_host }}",
+                "port": {{ opflex_peer_port }}
+            }
+        ],
+        "ssl": {
+            "mode": "{{ opflex_ssl_mode }}",
+            "ca-store": "{{ opflex_ssl_ca_store }}"
+        }
+    },
+    "endpoint-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/endpoints"]
+    },
+    "service-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/services"]
+    },
+    "snat-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/snats"]
+    },
+    "drop-log-config-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/droplog"]
+    },
+    "out-of-band-config-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/outofband"]
+    },
+    "host-agent-fault-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/faults"]
+    },
+    "plugins": {
+        "renderer": ["libopflex_agent_renderer_openvswitch.so"]
+    },
+    "renderers": {
+        "stitched-mode": {
+            "int-bridge-name": "{{ opflex_integration_bridge }}",
+            "access-bridge-name": "{{ opflex_access_bridge }}",
+            "encap": {
+{% if opflex_encap_mode == 'vxlan' %}
+                "vxlan": {
+                    "encap-iface": "{{ opflex_encap_interface }}",
+                    "uplink-iface": "{{ opflex_uplink_vlan_interface }}",
+                    "uplink-vlan": {{ opflex_infra_vlan }},
+{%     if opflex_uplink_native_interface | length > 0 %}
+                    "uplink-native-iface": "{{ opflex_uplink_native_interface }}",
+{%     endif %}
+                    "remote-ip": "{{ opflex_remote_ip }}",
+                    "remote-port": {{ opflex_remote_port }}
+                }
+{% else %}
+                "vlan": {
+                    "encap-iface": "{{ opflex_uplink_interface }}"
+                }
+{% endif %}
+            },
+            "flowid-cache-dir": "{{ opflex_agent_ovs_state_dir }}/ids",
+            "mcast-group-file": "{{ opflex_agent_ovs_state_dir }}/mcast/opflex-groups.json",
+            "dns-cache-dir": "{{ opflex_agent_ovs_state_dir }}/dns"
+        }
+    }
+}

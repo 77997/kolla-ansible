@@ -1,0 +1,7 @@
+---
+- name: Precheck AIM configuration
+  ansible.builtin.import_role:
+    name: service-precheck
+  vars:
+    service_precheck_services: "{{ aci_aim_services }}"
+    service_name: "{{ project_name }}"

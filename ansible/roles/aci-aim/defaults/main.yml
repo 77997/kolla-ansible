@@ -1,0 +1,139 @@
+---
+aci_aim_services:
+  aci-aim-aid:
+    container_name: "aci_aim_aid"
+    image: "{{ aci_aim_image_full }}"
+    enabled: "{{ enable_aci_aim }}"
+    group: aci-aim
+    host_in_groups: "{{ inventory_hostname in groups['aci-aim'] }}"
+    volumes: "{{ aci_aim_aid_default_volumes + aci_aim_extra_volumes }}"
+    dimensions: "{{ aci_aim_dimensions }}"
+    healthcheck: "{{ aci_aim_aid_healthcheck }}"
+  aci-aim-event-rpc:
+    container_name: "aci_aim_event_rpc"
+    image: "{{ aci_aim_image_full }}"
+    enabled: "{{ enable_aci_aim }}"
+    group: aci-aim
+    host_in_groups: "{{ inventory_hostname in groups['aci-aim'] }}"
+    volumes: "{{ aci_aim_event_rpc_default_volumes + aci_aim_extra_volumes }}"
+    dimensions: "{{ aci_aim_dimensions }}"
+    healthcheck: "{{ aci_aim_event_rpc_healthcheck }}"
+  aci-aim-event-polling:
+    container_name: "aci_aim_event_polling"
+    image: "{{ aci_aim_image_full }}"
+    enabled: "{{ enable_aci_aim }}"
+    group: aci-aim
+    host_in_groups: "{{ inventory_hostname in groups['aci-aim'] }}"
+    volumes: "{{ aci_aim_event_polling_default_volumes + aci_aim_extra_volumes }}"
+    dimensions: "{{ aci_aim_dimensions }}"
+    healthcheck: "{{ aci_aim_event_polling_healthcheck }}"
+
+####################
+# APIC connection
+####################
+aci_apic_hosts: ""
+aci_apic_username: "admin"
+aci_apic_password: ""
+aci_apic_use_ssl: "True"
+aci_aim_system_id: "openstack_aid"
+
+####################
+# Database
+####################
+# NOTE: AIM keeps its tables in the Neutron database, so these have to match
+# what the neutron role computes. They repeat those expressions rather than
+# referencing neutron_database_name/user, because those live in the neutron
+# role's defaults and role defaults are not in scope in the aci-aim play.
+# neutron_database_password is global, from passwords.yml, so it is referenced.
+aci_aim_database_name: "neutron"
+aci_aim_database_user: "{% if use_preconfigured_databases | bool and use_common_mariadb_user | bool %}{{ database_user }}{% else %}neutron{% endif %}"
+aci_aim_database_password: "{{ neutron_database_password }}"
+aci_aim_database_address: "{{ database_address | put_address_in_context('url') }}:{{ database_port }}"
+
+####################
+# Database sharding
+####################
+aci_aim_database_shard_root_user: "{% if enable_proxysql | bool %}root_shard_{{ aci_aim_database_shard_id }}{% else %}{{ database_user }}{% endif %}"
+aci_aim_database_shard_id: "{{ mariadb_default_database_shard_id | int }}"
+aci_aim_database_shard:
+  users:
+    - user: "{{ aci_aim_database_user }}"
+      password: "{{ aci_aim_database_password }}"
+      shard_id: "{{ aci_aim_database_shard_id }}"
+  rules:
+    - schema: "{{ aci_aim_database_name }}"
+      shard_id: "{{ aci_aim_database_shard_id }}"
+    - user: "{{ aci_aim_database_user }}"
+      shard_id: "{{ aci_aim_database_shard_id }}"
+
+####################
+# Docker
+####################
+aci_aim_tag: "{{ openstack_tag }}"
+
+aci_aim_image: "{{ docker_image_url }}aci-aim-base"
+aci_aim_image_full: "{{ aci_aim_image }}:{{ aci_aim_tag }}"
+
+aci_aim_dimensions: "{{ default_container_dimensions }}"
+
+aci_aim_aid_enable_healthchecks: "{{ enable_container_healthchecks }}"
+aci_aim_aid_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
+aci_aim_aid_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
+aci_aim_aid_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
+aci_aim_aid_healthcheck_test: ["CMD-SHELL", "true"]
+aci_aim_aid_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
+aci_aim_aid_healthcheck:
+  interval: "{{ aci_aim_aid_healthcheck_interval }}"
+  retries: "{{ aci_aim_aid_healthcheck_retries }}"
+  start_period: "{{ aci_aim_aid_healthcheck_start_period }}"
+  test: "{% if aci_aim_aid_enable_healthchecks | bool %}{{ aci_aim_aid_healthcheck_test }}{% else %}NONE{% endif %}"
+  timeout: "{{ aci_aim_aid_healthcheck_timeout }}"
+
+aci_aim_event_rpc_enable_healthchecks: "{{ enable_container_healthchecks }}"
+aci_aim_event_rpc_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
+aci_aim_event_rpc_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
+aci_aim_event_rpc_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
+aci_aim_event_rpc_healthcheck_test: ["CMD-SHELL", "true"]
+aci_aim_event_rpc_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
+aci_aim_event_rpc_healthcheck:
+  interval: "{{ aci_aim_event_rpc_healthcheck_interval }}"
+  retries: "{{ aci_aim_event_rpc_healthcheck_retries }}"
+  start_period: "{{ aci_aim_event_rpc_healthcheck_start_period }}"
+  test: "{% if aci_aim_event_rpc_enable_healthchecks | bool %}{{ aci_aim_event_rpc_healthcheck_test }}{% else %}NONE{% endif %}"
+  timeout: "{{ aci_aim_event_rpc_healthcheck_timeout }}"
+
+aci_aim_event_polling_enable_healthchecks: "{{ enable_container_healthchecks }}"
+aci_aim_event_polling_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
+aci_aim_event_polling_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
+aci_aim_event_polling_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
+aci_aim_event_polling_healthcheck_test: ["CMD-SHELL", "true"]
+aci_aim_event_polling_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
+aci_aim_event_polling_healthcheck:
+  interval: "{{ aci_aim_event_polling_healthcheck_interval }}"
+  retries: "{{ aci_aim_event_polling_healthcheck_retries }}"
+  start_period: "{{ aci_aim_event_polling_healthcheck_start_period }}"
+  test: "{% if aci_aim_event_polling_enable_healthchecks | bool %}{{ aci_aim_event_polling_healthcheck_test }}{% else %}NONE{% endif %}"
+  timeout: "{{ aci_aim_event_polling_healthcheck_timeout }}"
+
+aci_aim_aid_default_volumes:
+  - "{{ node_config_directory }}/aci-aim-aid/:{{ container_config_directory }}/:ro"
+  - "/etc/localtime:/etc/localtime:ro"
+  - "kolla_logs:/var/log/kolla/"
+  - "aci_aim:/var/lib/aim/"
+aci_aim_event_rpc_default_volumes:
+  - "{{ node_config_directory }}/aci-aim-event-rpc/:{{ container_config_directory }}/:ro"
+  - "/etc/localtime:/etc/localtime:ro"
+  - "kolla_logs:/var/log/kolla/"
+  - "aci_aim:/var/lib/aim/"
+aci_aim_event_polling_default_volumes:
+  - "{{ node_config_directory }}/aci-aim-event-polling/:{{ container_config_directory }}/:ro"
+  - "/etc/localtime:/etc/localtime:ro"
+  - "kolla_logs:/var/log/kolla/"
+  - "aci_aim:/var/lib/aim/"
+
+aci_aim_extra_volumes: "{{ default_extra_volumes }}"
+
+####################
+# OpenStack
+####################
+aci_aim_logging_debug: "{{ openstack_logging_debug }}"

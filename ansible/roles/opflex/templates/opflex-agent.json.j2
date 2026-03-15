@@ -1,0 +1,35 @@
+{
+    "command": "neutron-opflex-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/opflex_agent.ini --log-file /var/log/kolla/opflex/opflex-agent.log",
+    "config_files": [
+        {
+            "source": "{{ container_config_directory }}/neutron.conf",
+            "dest": "/etc/neutron/neutron.conf",
+            "owner": "opflex",
+            "perm": "0600"
+        },
+        {
+            "source": "{{ container_config_directory }}/opflex_agent.ini",
+            "dest": "/etc/neutron/opflex_agent.ini",
+            "owner": "opflex",
+            "perm": "0600"
+        }{% if enable_neutron_packet_logging | default(false) | bool %},
+        {
+            "source": "{{ container_config_directory }}/opflex_droplog.conf",
+            "dest": "/var/lib/kolla/config_files/opflex_droplog.conf",
+            "owner": "opflex",
+            "perm": "0600"
+        }{% endif %}
+    ],
+    "permissions": [
+        {
+            "path": "/var/log/kolla/opflex",
+            "owner": "opflex:opflex",
+            "recurse": true
+        },
+        {
+            "path": "/var/lib/opflex-agent-ovs/droplog",
+            "owner": "opflex:opflex",
+            "recurse": true
+        }
+    ]
+}

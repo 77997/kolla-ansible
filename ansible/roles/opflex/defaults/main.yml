@@ -1,0 +1,141 @@
+---
+opflex_services:
+  opflex-agent:
+    container_name: "opflex_agent"
+    image: "{{ opflex_agent_image_full }}"
+    enabled: "{{ enable_opflex }}"
+    group: opflex
+    host_in_groups: "{{ inventory_hostname in groups['compute'] }}"
+    privileged: true
+    environment:
+      OPFLEX_ENABLE_DROP_LOG: "{{ 'true' if enable_neutron_packet_logging | default(false) | bool else 'false' }}"
+    volumes: "{{ opflex_agent_default_volumes + opflex_agent_extra_volumes }}"
+    dimensions: "{{ opflex_agent_dimensions }}"
+    healthcheck: "{{ opflex_agent_healthcheck }}"
+  opflex-agent-ovs:
+    container_name: "opflex_agent_ovs"
+    image: "{{ opflex_agent_image_full }}"
+    enabled: "{{ enable_opflex }}"
+    group: opflex
+    host_in_groups: "{{ inventory_hostname in groups['compute'] }}"
+    privileged: true
+    # NOTE: the image's kolla_extend_start dereferences this unconditionally
+    # and is sourced by a start.sh running under "set -o nounset", so leaving
+    # it unset aborts startup before the agent is ever executed. It also
+    # drives the drop-log wrapper around the agent binary, which is why this
+    # container does not pass --drop_log_syslog itself.
+    environment:
+      OPFLEX_ENABLE_DROP_LOG: "{{ 'true' if enable_neutron_packet_logging | default(false) | bool else 'false' }}"
+    volumes: "{{ opflex_agent_ovs_default_volumes + opflex_agent_ovs_extra_volumes }}"
+    dimensions: "{{ opflex_agent_ovs_dimensions }}"
+    healthcheck: "{{ opflex_agent_ovs_healthcheck }}"
+  opflex-mcast-daemon:
+    container_name: "opflex_mcast_daemon"
+    image: "{{ opflex_agent_image_full }}"
+    enabled: "{{ enable_opflex | bool and opflex_encap_mode == 'vxlan' }}"
+    group: opflex
+    host_in_groups: "{{ inventory_hostname in groups['compute'] }}"
+    privileged: true
+    # NOTE: set for the same reason as opflex-agent-ovs. The multicast daemon
+    # has no drop log of its own, so it is always false here.
+    environment:
+      OPFLEX_ENABLE_DROP_LOG: "false"
+    volumes: "{{ opflex_mcast_daemon_default_volumes + opflex_mcast_daemon_extra_volumes }}"
+    dimensions: "{{ opflex_mcast_daemon_dimensions }}"
+    healthcheck: "{{ opflex_mcast_daemon_healthcheck }}"
+
+####################
+# Docker
+####################
+opflex_tag: "{{ openstack_tag }}"
+
+opflex_agent_image: "{{ docker_image_url }}opflex-agent"
+opflex_agent_tag: "{{ opflex_tag }}"
+opflex_agent_image_full: "{{ opflex_agent_image }}:{{ opflex_agent_tag }}"
+
+opflex_agent_dimensions: "{{ default_container_dimensions }}"
+opflex_agent_ovs_dimensions: "{{ default_container_dimensions }}"
+opflex_mcast_daemon_dimensions: "{{ default_container_dimensions }}"
+
+opflex_agent_enable_healthchecks: "{{ enable_container_healthchecks }}"
+opflex_agent_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
+opflex_agent_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
+opflex_agent_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
+opflex_agent_healthcheck_test: ["CMD-SHELL", "true"]
+opflex_agent_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
+opflex_agent_healthcheck:
+  interval: "{{ opflex_agent_healthcheck_interval }}"
+  retries: "{{ opflex_agent_healthcheck_retries }}"
+  start_period: "{{ opflex_agent_healthcheck_start_period }}"
+  test: "{% if opflex_agent_enable_healthchecks | bool %}{{ opflex_agent_healthcheck_test }}{% else %}NONE{% endif %}"
+  timeout: "{{ opflex_agent_healthcheck_timeout }}"
+
+opflex_agent_ovs_enable_healthchecks: "{{ enable_container_healthchecks }}"
+opflex_agent_ovs_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
+opflex_agent_ovs_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
+opflex_agent_ovs_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
+opflex_agent_ovs_healthcheck_test: ["CMD-SHELL", "true"]
+opflex_agent_ovs_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
+opflex_agent_ovs_healthcheck:
+  interval: "{{ opflex_agent_ovs_healthcheck_interval }}"
+  retries: "{{ opflex_agent_ovs_healthcheck_retries }}"
+  start_period: "{{ opflex_agent_ovs_healthcheck_start_period }}"
+  test: "{% if opflex_agent_ovs_enable_healthchecks | bool %}{{ opflex_agent_ovs_healthcheck_test }}{% else %}NONE{% endif %}"
+  timeout: "{{ opflex_agent_ovs_healthcheck_timeout }}"
+
+opflex_mcast_daemon_enable_healthchecks: "{{ enable_container_healthchecks }}"
+opflex_mcast_daemon_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
+opflex_mcast_daemon_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
+opflex_mcast_daemon_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
+opflex_mcast_daemon_healthcheck_test: ["CMD-SHELL", "true"]
+opflex_mcast_daemon_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
+opflex_mcast_daemon_healthcheck:
+  interval: "{{ opflex_mcast_daemon_healthcheck_interval }}"
+  retries: "{{ opflex_mcast_daemon_healthcheck_retries }}"
+  start_period: "{{ opflex_mcast_daemon_healthcheck_start_period }}"
+  test: "{% if opflex_mcast_daemon_enable_healthchecks | bool %}{{ opflex_mcast_daemon_healthcheck_test }}{% else %}NONE{% endif %}"
+  timeout: "{{ opflex_mcast_daemon_healthcheck_timeout }}"
+
+# NOTE: neutron-opflex-agent writes the endpoint and service files that
+# agent-ovs reads, so the two containers must agree on these paths and share
+# the volumes holding them.
+opflex_agent_default_volumes:
+  - "{{ node_config_directory }}/opflex-agent/:{{ container_config_directory }}/:ro"
+  - "/etc/localtime:/etc/localtime:ro"
+  - "/lib/modules:/lib/modules:ro"
+  - "/run/openvswitch:/run/openvswitch:shared"
+  - "kolla_logs:/var/log/kolla/"
+  - "opflex_agent_epg:{{ opflex_agent_ovs_state_dir }}/endpoints/"
+  - "opflex_agent_services:{{ opflex_agent_ovs_state_dir }}/services/"
+  - "opflex_agent_snats:{{ opflex_agent_ovs_state_dir }}/snats/"
+  - "opflex_agent_droplog:{{ opflex_agent_ovs_state_dir }}/droplog/"
+
+opflex_agent_ovs_default_volumes:
+  - "{{ node_config_directory }}/opflex-agent-ovs/:{{ container_config_directory }}/:ro"
+  - "/etc/localtime:/etc/localtime:ro"
+  - "/lib/modules:/lib/modules:ro"
+  - "/run/openvswitch:/run/openvswitch:shared"
+  - "kolla_logs:/var/log/kolla/"
+  - "opflex_agent_epg:{{ opflex_agent_ovs_state_dir }}/endpoints/"
+  - "opflex_agent_services:{{ opflex_agent_ovs_state_dir }}/services/"
+  - "opflex_agent_snats:{{ opflex_agent_ovs_state_dir }}/snats/"
+  - "opflex_agent_droplog:{{ opflex_agent_ovs_state_dir }}/droplog/"
+  - "opflex_agent_ids:{{ opflex_agent_ovs_state_dir }}/ids/"
+  - "opflex_agent_mcast:{{ opflex_agent_ovs_state_dir }}/mcast/"
+  - "opflex_agent_dns:{{ opflex_agent_ovs_state_dir }}/dns/"
+  - "opflex_agent_faults:{{ opflex_agent_ovs_state_dir }}/faults/"
+  - "opflex_agent_outofband:{{ opflex_agent_ovs_state_dir }}/outofband/"
+
+opflex_mcast_daemon_default_volumes:
+  - "{{ node_config_directory }}/opflex-mcast-daemon/:{{ container_config_directory }}/:ro"
+  - "/etc/localtime:/etc/localtime:ro"
+  - "kolla_logs:/var/log/kolla/"
+  - "opflex_agent_mcast:{{ opflex_agent_ovs_state_dir }}/mcast/"
+
+opflex_agent_dpdk_volumes:
+  - "/dev/hugepages:/dev/hugepages:shared"
+
+opflex_extra_volumes: "{{ default_extra_volumes }}"
+opflex_agent_extra_volumes: "{{ opflex_extra_volumes + (opflex_agent_dpdk_volumes if enable_ovs_dpdk | bool else []) }}"
+opflex_agent_ovs_extra_volumes: "{{ opflex_extra_volumes + (opflex_agent_dpdk_volumes if enable_ovs_dpdk | bool else []) }}"
+opflex_mcast_daemon_extra_volumes: "{{ opflex_extra_volumes }}"

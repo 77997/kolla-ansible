@@ -11,16 +11,28 @@
       settings and Kolla Ansible needs this file for mounting it to containers.
   when: not etc_localtime.stat.exists
 
-- block:
+- name: Ensure /etc/timezone exists on Debian
+  when: ansible_facts.os_family == 'Debian'
+  block:
     - name: Ensure /etc/timezone exist
-      stat:
+      ansible.builtin.stat:
         path: /etc/timezone
       register: etc_timezone
 
-    - name: Fail if /etc/timezone is absent
-      fail:
-        msg: >-
-          /etc/timezone is not found. This file is used for system-wide timezone
-          settings and Kolla Ansible needs this file for mounting it to containers.
+    - name: Generate /etc/timezone from /etc/localtime if absent
+      ansible.builtin.shell: >-
+        set -o pipefail &&
+        readlink -f /etc/localtime | sed 's|.*/zoneinfo/||'
+      args:
+        executable: /bin/bash
+      register: timezone_from_localtime
+      changed_when: false
       when: not etc_timezone.stat.exists
-  when: ansible_facts.os_family == 'Debian'
+
+    - name: Create /etc/timezone from /etc/localtime
+      ansible.builtin.copy:
+        content: "{{ timezone_from_localtime.stdout }}\n"
+        dest: /etc/timezone
+        mode: "0644"
+      become: true
+      when: not etc_timezone.stat.exists

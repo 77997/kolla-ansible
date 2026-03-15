@@ -1,0 +1,51 @@
+---
+# NOTE: environment has to be passed here as well as in check-containers,
+# otherwise a restart recreates the container without OPFLEX_ENABLE_DROP_LOG
+# and the next compare_container notifies this handler all over again.
+- name: Restart opflex-agent container
+  vars:
+    service_name: "opflex-agent"
+    service: "{{ opflex_services[service_name] }}"
+  become: true
+  kolla_container:
+    action: "recreate_or_restart_container"
+    common_options: "{{ docker_common_options }}"
+    name: "{{ service.container_name }}"
+    image: "{{ service.image }}"
+    privileged: "{{ service.privileged | default(False) }}"
+    environment: "{{ service.environment | default(omit) }}"
+    volumes: "{{ service.volumes }}"
+    dimensions: "{{ service.dimensions }}"
+    healthcheck: "{{ service.healthcheck }}"
+
+- name: Restart opflex-agent-ovs container
+  vars:
+    service_name: "opflex-agent-ovs"
+    service: "{{ opflex_services[service_name] }}"
+  become: true
+  kolla_container:
+    action: "recreate_or_restart_container"
+    common_options: "{{ docker_common_options }}"
+    name: "{{ service.container_name }}"
+    image: "{{ service.image }}"
+    privileged: "{{ service.privileged | default(False) }}"
+    environment: "{{ service.environment | default(omit) }}"
+    volumes: "{{ service.volumes }}"
+    dimensions: "{{ service.dimensions }}"
+    healthcheck: "{{ service.healthcheck }}"
+
+- name: Restart opflex-mcast-daemon container
+  vars:
+    service_name: "opflex-mcast-daemon"
+    service: "{{ opflex_services[service_name] }}"
+  become: true
+  kolla_container:
+    action: "recreate_or_restart_container"
+    common_options: "{{ docker_common_options }}"
+    name: "{{ service.container_name }}"
+    image: "{{ service.image }}"
+    privileged: "{{ service.privileged | default(False) }}"
+    environment: "{{ service.environment | default(omit) }}"
+    volumes: "{{ service.volumes }}"
+    dimensions: "{{ service.dimensions }}"
+    healthcheck: "{{ service.healthcheck }}"

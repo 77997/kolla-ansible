@@ -1,0 +1,23 @@
+{
+    "command": "opflex_agent --watch --config {{ opflex_agent_ovs_config_dir }} --log /var/log/kolla/opflex/opflex-agent-ovs.log",
+    "config_files": [
+        {
+            "source": "{{ container_config_directory }}/opflex-agent-ovs.conf",
+            "dest": "{{ opflex_agent_ovs_config_dir }}/10-opflex-agent-ovs.conf",
+            "owner": "opflex",
+            "perm": "0600"
+        }
+    ],
+    "permissions": [
+        {
+            "path": "/var/log/kolla/opflex",
+            "owner": "opflex:opflex",
+            "recurse": true
+        },
+        {
+            "path": "{{ opflex_agent_ovs_state_dir }}",
+            "owner": "opflex:opflex",
+            "recurse": true
+        }
+    ]
+}

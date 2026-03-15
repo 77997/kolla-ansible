@@ -1,0 +1,35 @@
+[DEFAULT]
+debug = {{ aci_aim_logging_debug }}
+transport_url = {{ rpc_transport_url }}
+
+[database]
+connection = mysql+pymysql://{{ aci_aim_database_user }}:{{ aci_aim_database_password }}@{{ aci_aim_database_address }}/{{ aci_aim_database_name }}
+connection_recycle_time = {{ database_connection_recycle_time }}
+max_pool_size = {{ database_max_pool_size }}
+max_retries = -1
+
+[aim]
+aim_system_id = {{ aci_aim_system_id | default('openstack_aid') }}
+agent_down_time = 75
+poll_config = False
+unix_socket_path = /var/lib/aim/events/aid.sock
+
+[apic]
+apic_hosts = {{ aci_apic_hosts }}
+apic_username = {{ aci_apic_username }}
+apic_password = {{ aci_apic_password }}
+apic_use_ssl = {{ aci_apic_use_ssl | default('True') }}
+
+[oslo_messaging_rabbit]
+use_queue_manager = true
+heartbeat_in_pthread = false
+{% if om_enable_rabbitmq_tls | bool %}
+ssl = true
+ssl_ca_file = {{ om_rabbitmq_cacert }}
+{% endif %}
+rabbit_quorum_queue = true
+{% if om_enable_rabbitmq_stream_fanout | bool %}
+rabbit_stream_fanout = true
+rabbit_qos_prefetch_count = {{ om_rabbitmq_qos_prefetch_count }}
+{% endif %}
+rabbit_transient_quorum_queue = true

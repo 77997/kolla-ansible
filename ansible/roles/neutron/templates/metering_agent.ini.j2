@@ -1,3 +1,7 @@
 [DEFAULT]
 interface_driver = neutron.agent.linux.interface.OVSInterfaceDriver
+{% if neutron_plugin_agent == 'aci' %}
+driver = gbpservice.neutron.services.metering.aim.metering_driver.AciMeteringDriver
+{% else %}
 driver = neutron.services.metering.drivers.iptables.iptables_driver.IptablesMeteringDriver
+{% endif %}

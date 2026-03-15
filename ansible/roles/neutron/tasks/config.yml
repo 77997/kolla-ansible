@@ -64,6 +64,8 @@
     service_name: "{{ item.key }}"
     services_need_neutron_conf:
       - "ironic-neutron-agent"
+      - "neutron-aci-pf-agent"
+      - "neutron-aci-vpn-agent"
       - "neutron-bgp-dragent"
       - "neutron-dhcp-agent"
       - "neutron-eswitchd"
@@ -98,6 +100,7 @@
   vars:
     service_name: "{{ item.key }}"
     services_need_neutron_vpnaas_conf:
+      - "neutron-aci-vpn-agent"
       - "neutron-server"
       - "neutron-l3-agent"
   merge_configs:

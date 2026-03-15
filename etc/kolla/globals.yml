@@ -166,6 +166,46 @@ workaround_ansible_issue_8743: yes
 # Valid options are [ internal, infoblox ]
 #neutron_ipam_driver: "internal"
 
+########################
+# OpFlex host agent
+########################
+# Only used when neutron_plugin_agent is "aci". See the Cisco ACI guide for
+# the fabric side of these.
+
+# Interface on the OpFlex hosts facing the ACI leaf. There is no default -
+# set it per host in the inventory, or here when every OpFlex host is cabled
+# the same way.
+#opflex_uplink_interface: ""
+
+# The fabric infrastructure VLAN, tagged on the uplink. The resulting
+# sub-interface carries the OpFlex session and the tunnel endpoint address,
+# which APIC hands out over DHCP, and must stay outside OVS.
+#opflex_infra_vlan: 4093
+#opflex_uplink_vlan_interface: "{{ opflex_uplink_interface }}.{{ opflex_infra_vlan }}"
+
+# OpFlex proxy and anycast tunnel endpoint of the fabric. Both come out of
+# the fabric's infrastructure TEP pool, so change them if it is not the
+# default 10.0.0.0/16.
+#opflex_peer_host: "10.0.0.30"
+#opflex_peer_port: 8009
+#opflex_remote_ip: "10.0.0.32"
+#opflex_remote_port: 8472
+
+# Policy domain reported to the fabric. Cross-check against
+# "aimctl manager vmm-controller-list".
+#opflex_domain: "comp/prov-OpenStack/ctrlr-[{{ aci_vmm_domain_name }}]-{{ aci_vmm_domain_name }}/sw-InsiedeVM"
+
+# Security groups are enforced on the access bridge. Setting it to an empty
+# string disables the bridge, and with it that enforcement.
+#opflex_integration_bridge: "br-int"
+#opflex_access_bridge: "br-access"
+
+# Only for VLAN provider networks. The native uplink is added as a port on
+# the integration bridge alongside the VXLAN tunnel, and the physical
+# networks have to be listed for apic_aim to bind VLAN segments at all.
+#opflex_uplink_native_interface: ""
+#opflex_vlan_networks: ""
+
 # Configure Neutron upgrade option, currently Kolla support
 # two upgrade ways for Neutron: legacy_upgrade and rolling_upgrade
 # The variable "neutron_enable_rolling_upgrade: yes" is meaning rolling_upgrade

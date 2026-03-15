@@ -70,6 +70,9 @@
         - enable_telegraf_{{ enable_telegraf | bool }}
         - enable_trove_{{ enable_trove | bool }}
         - enable_watcher_{{ enable_watcher | bool }}
+        - enable_lldpd_{{ enable_lldpd | bool }}
+        - enable_opflex_{{ enable_opflex | bool }}
+        - enable_aci_aim_{{ enable_aci_aim | bool }}
         - enable_zun_{{ enable_zun | bool }}
   tags: always
 
@@ -146,6 +149,11 @@
     - { role: loadbalancer }
   tasks:
     - block:
+        - include_role:
+            name: aci-aim
+            tasks_from: loadbalancer
+          tags: aci-aim
+          when: enable_aci_aim | bool
         - include_role:
             name: aodh
             tasks_from: loadbalancer
@@ -682,6 +690,32 @@
     - { role: ovn-db,
         tags: [ovn, ovn-db] }
 
+- name: Apply role lldpd
+  gather_facts: false
+  hosts:
+    - lldpd
+    - '&enable_lldpd_True'
+  serial: '{{ kolla_serial|default("0") }}'
+  max_fail_percentage: >-
+    {{ lldpd_max_fail_percentage |
+       default(kolla_max_fail_percentage) |
+       default(100) }}
+  roles:
+    - { role: lldpd, tags: lldpd }
+
+- name: Apply role opflex
+  gather_facts: false
+  hosts:
+    - opflex
+    - '&enable_opflex_True'
+  serial: '{{ kolla_serial|default("0") }}'
+  max_fail_percentage: >-
+    {{ opflex_max_fail_percentage |
+       default(kolla_max_fail_percentage) |
+       default(100) }}
+  roles:
+    - { role: opflex, tags: opflex }
+
 # Nova deployment is more complicated than other services, so is covered in its
 # own playbook.
 - import_playbook: nova.yml
@@ -709,6 +743,19 @@
   roles:
     - { role: neutron,
         tags: neutron }
+
+- name: Apply role aci-aim
+  gather_facts: false
+  hosts:
+    - aci-aim
+    - '&enable_aci_aim_True'
+  serial: '{{ kolla_serial|default("0") }}'
+  max_fail_percentage: >-
+    {{ aci_aim_max_fail_percentage |
+       default(kolla_max_fail_percentage) |
+       default(100) }}
+  roles:
+    - { role: aci-aim, tags: aci-aim }
 
 - name: Apply role kuryr
   gather_facts: false

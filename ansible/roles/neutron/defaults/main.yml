@@ -100,7 +100,13 @@ neutron_services:
     container_name: "neutron_l3_agent"
     image: "{{ neutron_l3_agent_image_full }}"
     privileged: True
-    enabled: "{{ neutron_plugin_agent != 'ovn' }}"
+    # NOTE: apic_aim_l3 replaces the router service plugin and mixes in no
+    # L3AgentSchedulerDbMixin, so nothing answers the agent's startup
+    # get_host_ha_router_count RPC. The agent then retries that call forever,
+    # never reports its state, and never appears as a Neutron agent - so no
+    # router can be scheduled to it either way. The ACI VPN and port
+    # forwarding agents only share its inventory group, not this container.
+    enabled: "{{ neutron_plugin_agent not in ['ovn', 'aci'] }}"
     environment:
       KOLLA_IMAGE: "{{ neutron_l3_agent_image_full }}"
       KOLLA_NAME: "neutron_l3_agent"
@@ -187,7 +193,7 @@ neutron_services:
     dimensions: "{{ neutron_infoblox_ipam_agent_dimensions }}"
   neutron-metering-agent:
     container_name: "neutron_metering_agent"
-    image: "{{ neutron_metering_agent_image_full }}"
+    image: "{{ neutron_aci_agent_image_full if neutron_plugin_agent == 'aci' else neutron_metering_agent_image_full }}"
     privileged: True
     enabled: "{{ enable_neutron_metering | bool }}"
     group: "neutron-metering-agent"
@@ -213,6 +219,24 @@ neutron_services:
     volumes: "{{ neutron_ovn_agent_default_volumes + neutron_ovn_agent_extra_volumes }}"
     dimensions: "{{ neutron_ovn_agent_dimensions }}"
     healthcheck: "{{ neutron_ovn_agent_healthcheck }}"
+  neutron-aci-vpn-agent:
+    container_name: "neutron_aci_vpn_agent"
+    image: "{{ neutron_aci_agent_image_full }}"
+    privileged: true
+    enabled: "{{ enable_neutron_vpnaas | bool and neutron_plugin_agent == 'aci' }}"
+    group: "neutron-l3-agent"
+    host_in_groups: "{{ inventory_hostname in groups['neutron-l3-agent'] }}"
+    volumes: "{{ neutron_aci_vpn_agent_default_volumes + neutron_aci_vpn_agent_extra_volumes }}"
+    dimensions: "{{ neutron_aci_vpn_agent_dimensions }}"
+  neutron-aci-pf-agent:
+    container_name: "neutron_aci_pf_agent"
+    image: "{{ neutron_aci_agent_image_full }}"
+    privileged: true
+    enabled: "{{ enable_neutron_port_forwarding | bool and neutron_plugin_agent == 'aci' }}"
+    group: "neutron-l3-agent"
+    host_in_groups: "{{ inventory_hostname in groups['neutron-l3-agent'] }}"
+    volumes: "{{ neutron_aci_pf_agent_default_volumes + neutron_aci_pf_agent_extra_volumes }}"
+    dimensions: "{{ neutron_aci_pf_agent_dimensions }}"
 
 ####################
 # Config Validate
@@ -261,7 +285,6 @@ neutron_database_shard:
       shard_id: "{{ neutron_database_shard_id }}"
     - user: "{{ neutron_database_user }}"
       shard_id: "{{ neutron_database_shard_id }}"
-
 
 ####################
 # Docker
@@ -313,7 +336,7 @@ neutron_rpc_server_image: "{{ neutron_server_image }}"
 neutron_rpc_server_tag: "{{ neutron_tag }}"
 neutron_rpc_server_image_full: "{{ neutron_rpc_server_image }}:{{ neutron_rpc_server_tag }}"
 
-neutron_server_image: "{{ docker_image_url }}neutron-server"
+neutron_server_image: "{{ docker_image_url }}{% if neutron_plugin_agent == 'aci' %}neutron-server-plugin-networking-aci{% else %}neutron-server{% endif %}"
 neutron_server_tag: "{{ neutron_tag }}"
 neutron_server_image_full: "{{ neutron_server_image }}:{{ neutron_server_tag }}"
 
@@ -328,6 +351,14 @@ neutron_infoblox_ipam_agent_image_full: "{{ neutron_infoblox_ipam_agent_image }}
 neutron_metering_agent_image: "{{ docker_image_url }}neutron-metering-agent"
 neutron_metering_agent_tag: "{{ neutron_tag }}"
 neutron_metering_agent_image_full: "{{ neutron_metering_agent_image }}:{{ neutron_metering_agent_tag }}"
+
+# NOTE: the ACI service agents run group-based-policy code - the VPN and
+# port-forwarding agents are GBP console scripts, and the metering agent is
+# configured with an AIM driver from the same package. GBP is installed only
+# into the ACI neutron-server image, which is built FROM neutron-server FROM
+# neutron-base and so also carries every base agent binary, making it a strict
+# superset of the l3-agent and metering-agent images for this purpose.
+neutron_aci_agent_image_full: "{{ neutron_server_image_full }}"
 
 ironic_neutron_agent_image: "{{ docker_image_url }}ironic-neutron-agent"
 ironic_neutron_agent_tag: "{{ neutron_tag }}"
@@ -356,6 +387,8 @@ neutron_ovn_agent_dimensions: "{{ neutron_agent_dimensions }}"
 neutron_ovn_maintenance_worker_dimensions: "{{ default_container_dimensions }}"
 neutron_periodic_worker_dimensions: "{{ default_container_dimensions }}"
 neutron_rpc_server_dimensions: "{{ default_container_dimensions }}"
+neutron_aci_vpn_agent_dimensions: "{{ neutron_agent_dimensions }}"
+neutron_aci_pf_agent_dimensions: "{{ neutron_agent_dimensions }}"
 
 neutron_dhcp_agent_enable_healthchecks: "{{ enable_container_healthchecks }}"
 neutron_dhcp_agent_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
@@ -529,7 +562,6 @@ neutron_rpc_server_healthcheck:
 neutron_dhcp_agent_default_volumes:
   - "{{ node_config_directory }}/neutron-dhcp-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "neutron_metadata_socket:/var/lib/neutron/kolla/"
   - "/run/netns:/run/netns:shared"
   - "kolla_logs:/var/log/kolla/"
@@ -541,7 +573,6 @@ neutron_dhcp_agent_default_volumes:
 neutron_l3_agent_default_volumes:
   - "{{ node_config_directory }}/neutron-l3-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "/lib/modules:/lib/modules:ro"
   - "neutron_metadata_socket:/var/lib/neutron/kolla/"
   - "/run/netns:/run/netns:shared"
@@ -554,14 +585,12 @@ neutron_l3_agent_default_volumes:
 neutron_sriov_agent_default_volumes:
   - "{{ node_config_directory }}/neutron-sriov-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
   - "{{ kolla_dev_repos_directory ~ '/neutron:/dev-mode/neutron' if neutron_dev_mode | bool else '' }}"
 neutron_mlnx_agent_default_volumes:
   - "{{ node_config_directory }}/neutron-mlnx-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
   - "{{ kolla_dev_repos_directory ~ '/neutron:/dev-mode/neutron' if neutron_dev_mode | bool else '' }}"
@@ -569,14 +598,12 @@ neutron_eswitchd_default_volumes:
   - "{{ node_config_directory }}/neutron-eswitchd/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
   - "/run/libvirt:/run/libvirt:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
   - "{{ kolla_dev_repos_directory ~ '/neutron:/dev-mode/neutron' if neutron_dev_mode | bool else '' }}"
 neutron_metadata_agent_default_volumes:
   - "{{ node_config_directory }}/neutron-metadata-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "neutron_metadata_socket:/var/lib/neutron/kolla/"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
@@ -596,7 +623,6 @@ neutron_ovn_metadata_agent_default_volumes:
 neutron_openvswitch_agent_default_volumes:
   - "{{ node_config_directory }}/neutron-openvswitch-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "/lib/modules:/lib/modules:ro"
   - "/run/openvswitch:/run/openvswitch:shared"
   - "kolla_logs:/var/log/kolla/"
@@ -605,57 +631,65 @@ neutron_openvswitch_agent_default_volumes:
 neutron_server_default_volumes:
   - "{{ node_config_directory }}/neutron-server/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
   - "{{ kolla_dev_repos_directory ~ '/neutron:/dev-mode/neutron' if neutron_dev_mode | bool else '' }}"
 neutron_bgp_dragent_default_volumes:
   - "{{ node_config_directory }}/neutron-bgp-dragent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
 neutron_infoblox_ipam_agent_default_volumes:
   - "{{ node_config_directory }}/neutron-infoblox-ipam-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
 neutron_metering_agent_default_volumes:
   - "{{ node_config_directory }}/neutron-metering-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
   - "{{ kolla_dev_repos_directory ~ '/neutron:/dev-mode/neutron' if neutron_dev_mode | bool else '' }}"
 ironic_neutron_agent_default_volumes:
   - "{{ node_config_directory }}/ironic-neutron-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
 neutron_ovn_agent_default_volumes:
   - "{{ node_config_directory }}/neutron-ovn-agent/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
 neutron_ovn_maintenance_worker_default_volumes:
   - "{{ node_config_directory }}/neutron-ovn-maintenance-worker/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
 neutron_periodic_worker_default_volumes:
   - "{{ node_config_directory }}/neutron-periodic-worker/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
 neutron_rpc_server_default_volumes:
   - "{{ node_config_directory }}/neutron-rpc-server/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
+  - "kolla_logs:/var/log/kolla/"
+  - "{{ '/dev/shm:/dev/shm' }}"
+
+neutron_aci_vpn_agent_default_volumes:
+  - "{{ node_config_directory }}/neutron-aci-vpn-agent/:{{ container_config_directory }}/:ro"
+  - "/etc/localtime:/etc/localtime:ro"
+  - "/lib/modules:/lib/modules:ro"
+  - "/run/netns:/run/netns:shared"
+  - "/run/openvswitch:/run/openvswitch:shared"
+  - "kolla_logs:/var/log/kolla/"
+  - "{{ '/dev/shm:/dev/shm' }}"
+neutron_aci_pf_agent_default_volumes:
+  - "{{ node_config_directory }}/neutron-aci-pf-agent/:{{ container_config_directory }}/:ro"
+  - "/etc/localtime:/etc/localtime:ro"
+  - "/lib/modules:/lib/modules:ro"
+  - "/run/netns:/run/netns:shared"
+  - "/run/openvswitch:/run/openvswitch:shared"
   - "kolla_logs:/var/log/kolla/"
   - "{{ '/dev/shm:/dev/shm' }}"
 
@@ -677,6 +711,8 @@ neutron_ovn_agent_extra_volumes: "{{ neutron_extra_volumes }}"
 neutron_ovn_maintenance_worker_extra_volumes: "{{ neutron_extra_volumes }}"
 neutron_periodic_worker_extra_volumes: "{{ neutron_extra_volumes }}"
 neutron_rpc_server_extra_volumes: "{{ neutron_extra_volumes }}"
+neutron_aci_vpn_agent_extra_volumes: "{{ neutron_extra_volumes }}"
+neutron_aci_pf_agent_extra_volumes: "{{ neutron_extra_volumes }}"
 
 ####################
 # OpenStack
@@ -729,12 +765,14 @@ neutron_subprojects:
 mechanism_drivers:
   - name: "openvswitch"
     enabled: "{{ neutron_plugin_agent == 'openvswitch' }}"
+  - name: "apic_aim"
+    enabled: "{{ neutron_plugin_agent == 'aci' }}"
   - name: "mlnx_infiniband"
     enabled: "{{ enable_neutron_mlnx | bool }}"
   - name: "baremetal"
     enabled: "{{ enable_ironic_neutron_agent | bool }}"
   - name: "l2population"
-    enabled: "{{ neutron_plugin_agent != 'ovn' }}"
+    enabled: "{{ neutron_plugin_agent not in ['ovn', 'aci'] }}"
   - name: "ovn"
     enabled: "{{ neutron_plugin_agent == 'ovn' }}"
   - name: "sriovnicswitch"
@@ -754,6 +792,8 @@ extension_drivers:
     enabled: "{{ neutron_dns_integration | bool }}"
   - name: "sfc"
     enabled: "{{ enable_neutron_sfc | bool }}"
+  - name: "apic_aim"
+    enabled: "{{ neutron_plugin_agent == 'aci' }}"
 
 neutron_extension_drivers: "{{ extension_drivers | selectattr('enabled', 'equalto', true) | list }}"
 
@@ -774,10 +814,9 @@ neutron_rolling_upgrade_services: "{{ neutron_subprojects | selectattr('enabled'
 neutron_modules_default:
   - name: 'ip6_tables'
 neutron_modules_extra: []
-
-####################
+# ###################
 # Service Plugins
-####################
+# ###################
 service_plugins:
   - name: "firewall_v2"
     enabled: "{{ enable_neutron_fwaas | bool }}"
@@ -790,7 +829,9 @@ service_plugins:
   - name: "qos"
     enabled: "{{ enable_neutron_qos | bool }}"
   - name: "router"
-    enabled: "{{ neutron_plugin_agent != 'ovn' }}"
+    enabled: "{{ neutron_plugin_agent not in ['ovn', 'aci'] }}"
+  - name: "apic_aim_l3"
+    enabled: "{{ neutron_plugin_agent == 'aci' }}"
   - name: "segments"
     enabled: "{{ enable_neutron_segments | bool }}"
   - name: "sfc"
@@ -840,11 +881,11 @@ neutron_agent_extensions: "{{ agent_extensions | selectattr('enabled', 'equalto'
 
 l3_agent_extensions:
   - name: "fwaas_v2"
-    enabled: "{{ enable_neutron_fwaas | bool }}"
+    enabled: "{{ enable_neutron_fwaas | bool and neutron_plugin_agent != 'aci' }}"
   - name: "vpnaas"
-    enabled: "{{ enable_neutron_vpnaas | bool }}"
+    enabled: "{{ enable_neutron_vpnaas | bool and neutron_plugin_agent != 'aci' }}"
   - name: "port_forwarding"
-    enabled: "{{ enable_neutron_port_forwarding | bool }}"
+    enabled: "{{ enable_neutron_port_forwarding | bool and neutron_plugin_agent != 'aci' }}"
 
 neutron_l3_agent_extensions: "{{ l3_agent_extensions | selectattr('enabled', 'equalto', true) | list }}"
 
@@ -870,7 +911,6 @@ neutron_mlnx_physnets: "{{ neutron_mlnx_physnet_mappings.items() | map('join', '
 # Notification Drivers
 ######################
 notification_drivers: []
-
 neutron_notification_drivers: "{{ notification_drivers | selectattr('enabled', 'equalto', true) | list }}"
 
 ######################
@@ -894,8 +934,8 @@ neutron_ks_services:
     type: "network"
     description: "Openstack Networking"
     endpoints:
-      - {'interface': 'internal', 'url': '{{ neutron_internal_endpoint }}'}
-      - {'interface': 'public', 'url': '{{ neutron_public_endpoint }}'}
+      - { "interface": "internal", "url": "{{ neutron_internal_endpoint }}" }
+      - { "interface": "public", "url": "{{ neutron_public_endpoint }}" }
 
 neutron_ks_users:
   - project: "service"

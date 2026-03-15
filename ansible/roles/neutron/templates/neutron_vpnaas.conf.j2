@@ -1,2 +1,6 @@
 [service_providers]
+{% if neutron_plugin_agent == 'aci' %}
+service_provider = VPN:aci:gbpservice.neutron.services.vpn.aci.aci_vpn_driver:AciVpnServiceDriver:default
+{% else %}
 service_provider = VPN:openswan:neutron_vpnaas.services.vpn.service_drivers.ipsec.IPsecVPNDriver:default
+{% endif %}

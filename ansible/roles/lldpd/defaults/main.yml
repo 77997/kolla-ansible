@@ -1,0 +1,25 @@
+---
+lldpd_services:
+  lldpd:
+    container_name: lldpd
+    group: lldpd
+    enabled: "{{ enable_lldpd }}"
+    image: "{{ lldpd_image_full }}"
+    privileged: true
+    volumes: "{{ lldpd_default_volumes + lldpd_extra_volumes }}"
+    dimensions: "{{ lldpd_dimensions }}"
+
+####################
+# Docker
+####################
+lldpd_image: "{{ docker_image_url }}lldpd"
+lldpd_tag: "{{ openstack_tag }}"
+lldpd_image_full: "{{ lldpd_image }}:{{ lldpd_tag }}"
+
+lldpd_dimensions: "{{ default_container_dimensions }}"
+
+lldpd_default_volumes:
+  - "{{ node_config_directory }}/lldpd/:{{ container_config_directory }}/:ro"
+  - "/etc/localtime:/etc/localtime:ro"
+  - "kolla_logs:/var/log/kolla/"
+lldpd_extra_volumes: "{{ default_extra_volumes }}"

@@ -32,7 +32,11 @@ ovs_integration_bridge = br-int-{{ item }}
 host = {{ ansible_facts.hostname }}_{{ item }}
 {% endif %}
 
+{% if neutron_plugin_agent == 'aci' %}
+core_plugin = ml2plus
+{% else %}
 core_plugin = ml2
+{% endif %}
 service_plugins = {{ neutron_service_plugins|map(attribute='name')|join(',') }}
 
 {% if enable_neutron_agent_ha | bool %}
@@ -129,10 +133,35 @@ policy_file = {{ neutron_policy_file }}
 
 {% if enable_neutron_sfc | bool %}
 [sfc]
-drivers = ovs
+drivers = {{ 'aim' if neutron_plugin_agent == 'aci' else 'ovs' }}
 
 [flowclassifier]
-drivers = ovs
+drivers = {{ 'aim' if neutron_plugin_agent == 'aci' else 'ovs' }}
+{% endif %}
+
+{% if enable_neutron_fwaas | bool and neutron_plugin_agent == 'aci' %}
+[fwaas]
+driver = aci_useg
+{% endif %}
+
+{% if enable_neutron_metering | bool and neutron_plugin_agent == 'aci' %}
+[metering]
+driver = aci
+{% endif %}
+
+{% if enable_neutron_taas | bool and neutron_plugin_agent == 'aci' %}
+[taas]
+driver = aim
+{% endif %}
+
+{% if enable_neutron_vpnaas | bool and neutron_plugin_agent == 'aci' %}
+[vpnagent]
+vpn_device_driver = gbpservice.neutron.services.vpn.aci.aci_ipsec:AciIPsecDriver
+{% endif %}
+
+{% if enable_neutron_packet_logging | bool and neutron_plugin_agent == 'aci' %}
+[network_log]
+local_output_log_base = /var/log/kolla/neutron/packet-log
 {% endif %}
 
 {% if enable_designate | bool %}

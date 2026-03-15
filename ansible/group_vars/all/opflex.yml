@@ -1,0 +1,94 @@
+---
+enable_opflex: "{{ neutron_plugin_agent == 'aci' }}"
+
+########################
+# OpFlex host agent
+########################
+# Encapsulation used between the OpFlex hosts and the fabric. This has to
+# agree with the encapsulation of the VMM domain, hence the default.
+opflex_encap_mode: "{{ aci_vmm_encap_mode | default('vxlan') }}"
+
+# Physical interface facing the ACI leaf. There is no useful default for
+# this - set it per host in the inventory, or here when every OpFlex host is
+# cabled the same way.
+opflex_uplink_interface: ""
+
+# The fabric infrastructure VLAN. It is tagged on the uplink and carries
+# both the OpFlex session and the tunnel endpoint address, which APIC hands
+# out over DHCP.
+opflex_infra_vlan: 4093
+
+# Interface holding the tunnel endpoint address. agent-ovs reads the address
+# straight from the kernel rather than from OVS, so this must be an ordinary
+# netdev on the host and must never be enslaved to a bridge.
+opflex_uplink_vlan_interface: "{{ opflex_uplink_interface }}.{{ opflex_infra_vlan }}"
+
+# OpFlex proxy on the leaf. This is an anycast address out of the fabric's
+# infrastructure TEP pool, not an APIC management address.
+opflex_peer_host: "10.0.0.30"
+opflex_peer_port: 8009
+
+# Anycast VXLAN tunnel endpoint of the fabric, also out of the TEP pool.
+opflex_remote_ip: "10.0.0.32"
+opflex_remote_port: 8472
+
+# The policy domain this agent reports to the fabric. The default follows
+# the naming apicapi gives the VMM domain and its controller; check it
+# against "aimctl manager vmm-controller-list" before deploying.
+opflex_domain: "comp/prov-OpenStack/ctrlr-[{{ aci_vmm_domain_name | default('openstack') }}]-{{ aci_vmm_domain_name | default('openstack') }}/sw-InsiedeVM"
+
+# Unique name for this agent within the policy domain.
+opflex_agent_name: "{{ ansible_facts.nodename }}"
+
+opflex_ssl_mode: "encrypted"
+opflex_ssl_ca_store: "/etc/ssl/certs/"
+
+# OVS bridges owned by agent-ovs. Security groups are enforced on the access
+# bridge; setting it to an empty string disables the bridge, and with it
+# datapath security-group enforcement. The default name is kept separately
+# so the role can still remove the bridge once the setting is cleared.
+opflex_integration_bridge: "br-int"
+opflex_access_bridge_default: "br-access"
+opflex_access_bridge: "{{ opflex_access_bridge_default }}"
+
+# OVS tunnel port carrying the VXLAN encapsulated fabric traffic. agent-ovs
+# looks this port up by name and never creates it, so the opflex role does.
+opflex_encap_interface: "{{ opflex_integration_bridge }}_vxlan0"
+
+# Interface presented to OVS for VLAN encapsulated "local external"
+# endpoints, used by VLAN provider networks. Leave it empty unless those are
+# in use: when set it must be the physical uplink and it is added as a port
+# on the integration bridge, alongside - not instead of - the VXLAN tunnel.
+opflex_uplink_native_interface: ""
+
+# Physical networks this agent will bind VLAN segments on. apic_aim refuses
+# a VLAN segment whose physical network is absent from the list the agent
+# reports, so leaving this empty keeps the agent OpFlex only. Setting it
+# also requires the fabric side: a physical domain with a VLAN pool, a
+# host-domain mapping, and host links for the uplink.
+opflex_vlan_networks: ""
+
+########################
+# OpFlex ML2 type driver
+########################
+# Physical networks on which the opflex type driver may allocate segments,
+# rendered into [ml2_type_opflex] on the controllers.
+opflex_ml2_networks: "*"
+
+# VLAN ranges backing VLAN provider networks and the dynamic segments
+# apic_aim allocates for SR-IOV and non-OpFlex hosts, rendered into
+# [ml2_type_vlan] network_vlan_ranges. It has to agree with the VLAN pool
+# bound to the physical domain on APIC. Empty means no VLAN segments can be
+# allocated at all.
+opflex_vlan_ranges: ""
+
+# Directory the packet logging driver writes per-host drop-log configuration
+# into. neutron-server writes <dir>/<host>/openstack.droplogcfg and the OpFlex
+# agent reads it on the compute node, so enabling the Neutron logging API
+# means pointing this at storage both sides can see. The default is the
+# compute-local state directory, which is only correct on an all-in-one.
+opflex_drop_log_dir: "{{ opflex_agent_ovs_state_dir }}/droplog"
+
+opflex_agent_ovs_config_dir: "/etc/opflex-agent-ovs/conf.d"
+opflex_agent_ovs_state_dir: "/var/lib/opflex-agent-ovs"
+opflex_agent_ovs_log_level: "info"

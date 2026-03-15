@@ -68,4 +68,51 @@
   when:
     - neutron_dns_integration | bool
 
+- name: Checking for ACI-incompatible features
+  assert:
+    that:
+      - not (enable_neutron_dvr | bool)
+      - not (enable_neutron_bgp_dragent | bool)
+      - not (enable_neutron_agent_ha | bool)
+      - not (enable_neutron_segments | bool)
+      - not (enable_neutron_provider_networks | bool)
+      - not (enable_neutron_mlnx | bool)
+      - not (enable_neutron_infoblox_ipam_agent | bool)
+    fail_msg: >-
+      One or more enabled features cannot work with ACI. The fabric routes
+      and advertises natively, so DVR and BGP dynamic routing have nothing to
+      distribute, and apic_aim_l3 schedules no router to an agent, which also
+      makes L3 agent HA meaningless. apic_aim maps a network to exactly one
+      bridge domain and EPG, so routed provider networks collapse into a
+      single flood domain. Provider networks would build br-ex on the compute
+      nodes and take the OpFlex uplink with it, and no ACI object corresponds
+      to an InfiniBand partition. networking-infoblox is in neither image.
+      Set enable_neutron_dvr, enable_neutron_bgp_dragent,
+      enable_neutron_agent_ha, enable_neutron_segments,
+      enable_neutron_provider_networks, enable_neutron_mlnx and
+      enable_neutron_infoblox_ipam_agent to "no".
+  run_once: true
+  when:
+    - neutron_plugin_agent == 'aci'
+
+# NOTE: neutron-server writes <opflex_drop_log_dir>/<host>/openstack.droplogcfg
+# and the OpFlex agent reads it on the compute node, so the default, which is
+# the compute-local state directory, only works when the two are the same host.
+# Anywhere else the driver writes files nobody reads and the logging API
+# silently does nothing, which is worse than refusing to deploy.
+- name: Checking the OpFlex drop-log directory is shared for packet logging
+  ansible.builtin.assert:
+    that: opflex_drop_log_dir != (opflex_agent_ovs_state_dir ~ '/droplog')
+    fail_msg: >-
+      enable_neutron_packet_logging needs opflex_drop_log_dir to name storage
+      that both neutron-server and every compute node can see, because the
+      driver writes per-host drop-log configuration on the controller and the
+      OpFlex agent reads it on the compute. It is still at the compute-local
+      default, which cannot work with a separate compute node.
+  run_once: true
+  when:
+    - neutron_plugin_agent == 'aci'
+    - enable_neutron_packet_logging | bool
+    - groups['compute'] | difference(groups['neutron-server']) | length > 0
+
 - import_tasks: neutron_plugin_agent_check.yml

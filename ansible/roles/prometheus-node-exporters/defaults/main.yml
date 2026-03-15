@@ -38,23 +38,23 @@ prometheus_cadvisor_dimensions: "{{ default_container_dimensions }}"
 prometheus_node_exporter_default_volumes:
   - "{{ node_config_directory }}/prometheus-node-exporter/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "/:/host:ro,rslave"
 prometheus_cadvisor_default_volumes:
   - "{{ node_config_directory }}/prometheus-cadvisor/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"
   - "/:/rootfs:ro"
   - "/var/run:/var/run:rw"
   - "/sys:/sys:ro"
-  - "/var/lib/docker/:/var/lib/docker:ro"
+  # Podman uses /var/lib/containers instead of /var/lib/docker
+  - "{{ '/var/lib/docker/:/var/lib/docker:ro' if kolla_container_engine == 'docker' else '/var/lib/containers/:/var/lib/containers:ro' }}"
   - "/dev/disk/:/dev/disk:ro"
 
 prometheus_extra_volumes: "{{ default_extra_volumes }}"
 prometheus_node_exporter_extra_volumes: "{{ prometheus_extra_volumes }}"
 prometheus_cadvisor_extra_volumes: "{{ prometheus_extra_volumes }}"
 
-prometheus_cadvisor_cmdline_extras: "--docker_only --store_container_labels=false --disable_metrics=percpu,referenced_memory,cpu_topology,resctrl,udp,advtcp,sched,hugetlb,memory_numa,tcp,process --housekeeping_interval={{ prometheus_scrape_interval }}"
+# --docker_only is not supported by Podman
+prometheus_cadvisor_cmdline_extras: "{{ '--docker_only ' if kolla_container_engine == 'docker' else '' }}--store_container_labels=false --disable_metrics=percpu,referenced_memory,cpu_topology,resctrl,udp,advtcp,sched,hugetlb,memory_numa,tcp,process --housekeeping_interval={{ prometheus_scrape_interval }}"
 prometheus_node_exporter_cmdline_extras: ""

@@ -1,0 +1,82 @@
+---
+- name: Precheck OpFlex configuration
+  ansible.builtin.import_role:
+    name: service-precheck
+  vars:
+    service_precheck_services: "{{ opflex_services }}"
+    service_name: "{{ project_name }}"
+
+- name: Checking the OpFlex encapsulation mode
+  ansible.builtin.assert:
+    that: opflex_encap_mode in ['vlan', 'vxlan']
+    fail_msg: >-
+      opflex_encap_mode must be either "vlan" or "vxlan", not
+      "{{ opflex_encap_mode }}". It has to match the encapsulation of the
+      VMM domain.
+  run_once: true
+
+- name: Checking the OpFlex policy domain
+  ansible.builtin.assert:
+    that: opflex_domain | length > 0
+    fail_msg: >-
+      opflex_domain must name the policy domain this agent reports to the
+      fabric. Cross-check it against "aimctl manager vmm-controller-list".
+  run_once: true
+
+# NOTE: Ironic binds baremetal ports onto VLAN segments, which are allocated
+# out of [ml2_type_vlan] network_vlan_ranges. Under aci that is rendered from
+# opflex_vlan_ranges, so leaving it empty means no baremetal port can ever be
+# bound - and it fails at bind time rather than at deploy time.
+- name: Checking VLAN ranges are set when Ironic is enabled
+  ansible.builtin.assert:
+    that: opflex_vlan_ranges | length > 0
+    fail_msg: >-
+      opflex_vlan_ranges must list at least one <physnet>:<vlan_min>:<vlan_max>
+      range when Ironic is enabled, and it has to match the VLAN pool bound to
+      the physical domain on APIC.
+  run_once: true
+  when: enable_ironic | bool
+
+- name: Checking the OpFlex uplink interface
+  ansible.builtin.assert:
+    that:
+      - opflex_uplink_interface | length > 0
+      - opflex_uplink_interface in ansible_facts.interfaces
+    fail_msg: >-
+      opflex_uplink_interface must name an existing interface facing the ACI
+      leaf. Interface "{{ opflex_uplink_interface }}" was not found on
+      {{ inventory_hostname }}.
+  when: inventory_hostname in groups['compute']
+
+# NOTE: agent-ovs reads the tunnel endpoint address off this interface with
+# getifaddrs, so it has to be a plain kernel netdev carrying the address
+# APIC hands out on the infrastructure VLAN. It must never be an OVS port.
+- name: Checking the OpFlex infrastructure VLAN interface
+  ansible.builtin.assert:
+    that: opflex_uplink_vlan_interface in ansible_facts.interfaces
+    fail_msg: >-
+      "{{ opflex_uplink_vlan_interface }}" was not found on
+      {{ inventory_hostname }}. agent-ovs takes its VXLAN tunnel endpoint
+      address from this interface, so the infrastructure VLAN sub-interface
+      has to exist and hold an address from the APIC TEP pool.
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_encap_mode == 'vxlan'
+
+# NOTE: the native uplink is only consulted for VLAN encapsulated "local
+# external" endpoints and is added as a port on the integration bridge. The
+# infrastructure VLAN sub-interface stays outside OVS either way.
+- name: Checking the OpFlex native uplink interface
+  ansible.builtin.assert:
+    that:
+      - opflex_uplink_native_interface in ansible_facts.interfaces
+      - not (opflex_encap_mode == 'vxlan' and enable_ovs_dpdk | bool)
+    fail_msg: >-
+      opflex_uplink_native_interface "{{ opflex_uplink_native_interface }}"
+      was not found on {{ inventory_hostname }}, or it was combined with
+      ovs-dpdk. Under the netdev datapath OVS takes the interface outright
+      and the infrastructure VLAN sub-interface loses the tunnel endpoint
+      address, so a VXLAN OpFlex uplink cannot also be a DPDK bridge port.
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_uplink_native_interface | length > 0

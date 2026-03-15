@@ -1,0 +1,2 @@
+---
+enable_aci_aim: "{{ neutron_plugin_agent == 'aci' }}"

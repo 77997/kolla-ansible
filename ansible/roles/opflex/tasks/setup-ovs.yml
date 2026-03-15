@@ -1,0 +1,168 @@
+---
+- name: Create br-int bridge on OpenvSwitch
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_integration_bridge }}"
+      state: present
+      fail_mode: secure
+
+- name: Set br-int datapath type to netdev for DPDK
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Bridge
+      record: "{{ opflex_integration_bridge }}"
+      col: datapath_type
+      value: netdev
+  when: enable_ovs_dpdk | bool
+
+# NOTE: the access bridge is where agent-ovs enforces security groups. It is
+# only started when a name is configured, so leaving opflex_access_bridge
+# empty disables both the bridge and that enforcement. The bridge is removed
+# again in that case rather than left behind, so the setting is reversible.
+- name: Create the OpFlex access bridge on OpenvSwitch
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_access_bridge }}"
+      state: present
+      fail_mode: secure
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_access_bridge | length > 0
+
+- name: Remove the OpFlex access bridge when disabled
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_access_bridge_default }}"
+      state: absent
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_access_bridge | length == 0
+
+- name: Set the OpFlex access bridge datapath type to netdev for DPDK
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Bridge
+      record: "{{ opflex_access_bridge }}"
+      col: datapath_type
+      value: netdev
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_access_bridge | length > 0
+    - enable_ovs_dpdk | bool
+
+# NOTE: agent-ovs resolves the tunnel port by name through the OVS port
+# mapper and never creates it, so it has to exist before the agent starts.
+# The interface stays in error state between being added and being given its
+# type, which is why the type is set immediately below.
+- name: Create the OpFlex VXLAN tunnel port on the integration bridge
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_port
+    module_args:
+      bridge: "{{ opflex_integration_bridge }}"
+      port: "{{ opflex_encap_interface }}"
+      state: present
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_encap_mode == 'vxlan'
+
+- name: Set the type of the OpFlex VXLAN tunnel interface
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Interface
+      record: "{{ opflex_encap_interface }}"
+      col: type
+      value: vxlan
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_encap_mode == 'vxlan'
+
+# NOTE: remote_ip and key are flow based. agent-ovs sets the tunnel
+# destination and the VNID per flow from the policy it resolves over OpFlex,
+# so a fixed remote_ip here would break every non-local destination.
+- name: Set the options of the OpFlex VXLAN tunnel interface
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Interface
+      record: "{{ opflex_encap_interface }}"
+      col: options
+      key: "{{ item.key }}"
+      value: "{{ item.value }}"
+  loop:
+    - {key: "remote_ip", value: "flow"}
+    - {key: "key", value: "flow"}
+    - {key: "dst_port", value: "{{ opflex_remote_port }}"}
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_encap_mode == 'vxlan'
+
+# NOTE: only needed for VLAN provider networks, where agent-ovs tags "local
+# external" endpoints out of the physical uplink. The uplink keeps carrying
+# the infrastructure VLAN sub-interface for the tunnel endpoint, which stays
+# a plain kernel netdev and is deliberately not added here. That only works
+# on the kernel datapath, where the VLAN sub-interface still receives after
+# the parent is enslaved to a bridge. With the netdev datapath OVS takes the
+# device outright and the tunnel endpoint address goes with it, so the two
+# cannot be combined on one interface under DPDK.
+- name: Add the native uplink to the integration bridge
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_port
+    module_args:
+      bridge: "{{ opflex_integration_bridge }}"
+      port: "{{ opflex_uplink_native_interface }}"
+      state: present
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_uplink_native_interface | length > 0
+
+# NOTE: removing the port again matters more than usual here. Leaving a
+# physical interface on the integration bridge after the setting is cleared
+# would keep OVS attached to the OpFlex uplink, so the setting has to be
+# reversible in both directions.
+- name: Remove the native uplink from the integration bridge when disabled
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_port
+    module_args:
+      bridge: "{{ opflex_integration_bridge }}"
+      port: "{{ opflex_uplink_interface }}"
+      state: absent
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_uplink_native_interface | length == 0
+    - opflex_uplink_interface | length > 0

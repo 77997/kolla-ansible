@@ -22,7 +22,7 @@ neutron_enable_ovn_agent: "no"
 
 neutron_keystone_user: "neutron"
 
-# Valid options are [ openvswitch, ovn ]
+# Valid options are [ openvswitch, ovn, aci ]
 neutron_plugin_agent: "openvswitch"
 
 # Valid options are [ internal, infoblox ]
@@ -37,10 +37,16 @@ neutron_bgp_router_id: "1.1.1.1"
 neutron_bridge_name: "{{ 'br_dpdk' if enable_ovs_dpdk | bool else 'br-ex' }}"
 neutron_physical_networks: "{% for bridge in neutron_bridge_name.split(',') %}physnet{{ loop.index }}{% if not loop.last %},{% endif %}{% endfor %}"
 # Comma-separated type of enabled ml2 type drivers
-neutron_type_drivers: "flat,vlan,vxlan{% if neutron_plugin_agent == 'ovn' %},geneve{% endif %}"
+# NOTE: apic_aim binds ports off opflex type segments and falls back to vlan
+# for hosts with no OpFlex agent, so the aci list matches the one the driver
+# is tested against. flat is deliberately absent: apic_aim only programs
+# static paths for vlan segments, so a flat network can never reach the
+# fabric. The opflex type driver comes from the opflexagent package, which
+# is installed in the neutron-server-plugin-networking-aci image.
+neutron_type_drivers: "{{ {'aci': 'opflex,local,vlan', 'ovn': 'flat,vlan,vxlan,geneve'}.get(neutron_plugin_agent, 'flat,vlan,vxlan') }}"
 # Comma-separated types of tenant networks (should be listed in 'neutron_type_drivers')
 # NOTE: for ironic this list should also contain 'flat'
-neutron_tenant_network_types: "{% if neutron_plugin_agent == 'ovn' %}geneve{% else %}vxlan{% endif %}"
+neutron_tenant_network_types: "{% if neutron_plugin_agent == 'ovn' %}geneve{% elif neutron_plugin_agent == 'aci' %}opflex{% else %}vxlan{% endif %}"
 
 # valid values: ["dvr", "dvr_no_external"]
 neutron_compute_dvr_mode: "dvr"

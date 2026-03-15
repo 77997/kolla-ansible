@@ -1,6 +1,12 @@
 ---
 enable_octavia: "no"
 enable_octavia_driver_agent: "{{ enable_octavia | bool and neutron_plugin_agent == 'ovn' }}"
+# NOTE(upstream): octavia_provider_drivers is also defined in
+# roles/octavia/defaults/main.yml but must be duplicated here because
+# group_vars (octavia_auto_configure, enable_octavia_jobboard) reference it
+# and role defaults are not loaded in plays that don't include the octavia
+# role (e.g. destroy). This is an upstream bug.
+octavia_provider_drivers: "amphora:Amphora provider{% if neutron_plugin_agent == 'ovn' %}, ovn:OVN provider{% endif %}"
 enable_octavia_jobboard: "{{ enable_octavia | bool and 'amphora' in octavia_provider_drivers }}"
 
 ##########
