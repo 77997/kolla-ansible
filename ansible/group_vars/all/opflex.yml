@@ -1,0 +1,171 @@
+---
+enable_opflex: "{{ neutron_plugin_agent == 'aci' }}"
+
+########################
+# OpFlex host agent
+########################
+# Encapsulation used between the OpFlex hosts and the fabric. This has to
+# agree with the encapsulation of the VMM domain, hence the default.
+opflex_encap_mode: "{{ aci_vmm_encap_mode | default('vxlan') }}"
+
+# Physical interface facing the ACI leaf. There is no useful default for
+# this - set it per host in the inventory, or here when every OpFlex host is
+# cabled the same way.
+opflex_uplink_interface: ""
+
+# The fabric infrastructure VLAN. It is tagged on the uplink and carries
+# both the OpFlex session and the tunnel endpoint address, which APIC hands
+# out over DHCP.
+opflex_infra_vlan: 4093
+
+# Interface holding the tunnel endpoint address. agent-ovs reads the address
+# straight from the kernel rather than from OVS, so this must be an ordinary
+# netdev on the host and must never be enslaved to a bridge.
+opflex_uplink_vlan_interface: "{{ opflex_uplink_interface }}.{{ opflex_infra_vlan }}"
+
+# OpFlex proxy on the leaf. This is an anycast address out of the fabric's
+# infrastructure TEP pool, not an APIC management address.
+opflex_peer_host: "10.0.0.30"
+opflex_peer_port: 8009
+
+# Anycast VXLAN tunnel endpoint of the fabric, also out of the TEP pool.
+opflex_remote_ip: "10.0.0.32"
+opflex_remote_port: 8472
+
+# The policy domain this agent reports to the fabric in its send_identity, and
+# the single most unforgiving setting here.
+#
+# It is the DN of the OVS LOGICAL SWITCH (hvsLNode) that APIC creates under the
+# VMM controller - the controller DN plus "/sw-InsiemeLSOid" - NOT the bare
+# compCtrlr DN. The ODev field APIC fills from this string is lNodeDn, a logical
+# *node* reference, and Cisco's own agent defaults to the same shape (see
+# agent-ovs/cmd/test/policy_repo_stress.cpp: "comp/prov-OpenStack/
+# ctrlr-[stress]-stress/sw-InsiemeLSOid").
+#
+# Sending the bare controller DN gets you a fully successful TLS handshake and
+# then "EINVENTORY: EINVENTORY" on send_identity forever, because APIC cannot
+# resolve a logical switch at that DN: the opflexODev is created with
+# devType=unknown, domName="" and vmmCtrlrPKey="uni/vmmp-VMware/dom-/ctrlr-",
+# raising fault F0214 "Missing Valid Interface for Associated Domain" and, most
+# confusingly, the leaf then never receives vmmDomP at all, so its own log says
+# "Dropping PEp as vmmDomPMo ... is not available on leaf". Diagnosed 2026-08-31
+# on compute-2 after this cost weeks of chasing fabric topology.
+#
+# Cross-check the controller half with "moquery -c compCtrlr" on APIC, or
+# "aimctl manager vmm-controller-list"; confirm the logical switch itself with
+# "moquery -c hvsLNode" (dn ends in /sw-InsiemeLSOid).
+opflex_domain: "comp/prov-OpenStack/ctrlr-[{{ aci_vmm_domain_name | default('openstack') }}]-{{ aci_vmm_controller_name | default(aci_vmm_domain_name | default('openstack')) }}/sw-InsiemeLSOid"
+
+# Unique name for this agent within the policy domain.
+opflex_agent_name: "{{ ansible_facts.nodename }}"
+
+# Uplinks the APIC host agent runs LLDP against to discover which leaf and port
+# this node is cabled to. What it finds becomes the AIM HostLink.
+#
+# These must be PHYSICAL ports. LLDP is exchanged per link, so a bond has no
+# neighbour of its own - "lldpctl -f keyvalue bond2" returns nothing at all
+# while the same command against a member returns the full chassis and port
+# description. Nor is it the infrastructure VLAN sub-interface, since LLDP is
+# untagged on the port itself. This defaults to the uplink's bond members and
+# falls back to the uplink itself when it is not a bond.
+#
+# Getting this wrong fails silently: the agent only discards interfaces that
+# fail ip_lib.device_exists(), so a bond passes that check, lldpctl runs and
+# returns nothing, and the agent reports no topology while logging no error and
+# staying healthy on its RabbitMQ connection.
+#
+# NOTE the replace('-', '_'): Ansible normalises interface names in fact keys,
+# so an uplink named "bond-ext" is ansible_facts["bond_ext"]. Without this the
+# lookup misses, the expression falls back to the bond name itself, and the
+# agent silently reports no topology - which is exactly the failure this
+# variable exists to prevent. (Dots are NOT replaced: bond-ext.3914 is
+# ansible_facts["bond_ext.3914"].)
+opflex_host_agent_uplink_ports: "{{ (ansible_facts.get(opflex_uplink_interface | replace('-', '_'), {}).get('slaves', []) or [opflex_uplink_interface]) | join(',') }}"
+opflex_host_agent_poll_interval: 60
+opflex_host_agent_report_interval: 60
+
+opflex_ssl_mode: "encrypted"
+opflex_ssl_ca_store: "/etc/ssl/certs/"
+
+# Unix socket the agent's inspector listens on, which "gbp_inspect" queries to
+# dump resolved policy. The default matches the binary's compiled-in
+# LOCALSTATEDIR path (agent-ovs/lib/Agent.cpp DEF_INSPECT_SOCKET) so gbp_inspect
+# works without --socket. That directory does not exist in the image, so the
+# container creates it from its config.json before the agent starts; the agent
+# aborts rather than degrades when it cannot bind here.
+opflex_agent_ovs_inspector_enabled: true
+opflex_agent_ovs_inspector_socket: "/usr/local/var/run/opflex-agent-inspect.sock"
+
+# The published agent-ovs binaries are linked without libunbound or libcap-ng even
+# though the OpenvSwitch renderer calls ub_* for its DNS cache and capng_* to drop
+# capabilities, and the opflex_agent executable pulls in neither. dlopen of the
+# renderer then fails on the first missing symbol and the agent carries on with no
+# renderer at all - it resolves policy from the fabric and programs nothing into
+# OVS, which looks like a healthy agent and a dead datapath. Preloading puts the
+# symbols in the global scope before the plugin is loaded. The library is already
+# in the image, so this costs nothing. Set to "" once the published binaries link
+# libunbound and libcap-ng themselves. "ldd -r" on the plugin lists exactly two
+# external symbol families, ub_* and capng_*; every other unresolved symbol is
+# an opflexagent::* one that resolves from the executable at dlopen.
+# Runtime directory agent-ovs looks in for OVS' unix sockets - the OVSDB socket
+# and the OpenFlow management sockets of the bridges it programs. It resolves
+# them through OVS' own ovs_rundir(), which falls back to the rundir compiled
+# into the OVS libraries: for these binaries that is under /usr/local/var, which
+# does not exist here. Without this the agent starts, loads its renderer and
+# then fails every OVSDB connection and stats request, so it looks alive while
+# programming nothing. OVS_RUNDIR is the documented override and has to match
+# where the role mounts the host's /run/openvswitch.
+opflex_agent_ovs_rundir: "/run/openvswitch"
+
+opflex_agent_ovs_libdir: "/usr/lib/{{ 'powerpc64le-linux-gnu' if ansible_facts.architecture == 'ppc64le' else ansible_facts.architecture ~ '-linux-gnu' }}"
+opflex_agent_ovs_ld_preload: "{{ opflex_agent_ovs_libdir }}/libunbound.so.8 {{ opflex_agent_ovs_libdir }}/libcap-ng.so.0"
+
+# OVS bridges owned by agent-ovs. Security groups are enforced on the access
+# bridge; setting it to an empty string disables the bridge, and with it
+# datapath security-group enforcement. The default name is kept separately
+# so the role can still remove the bridge once the setting is cleared.
+opflex_integration_bridge: "br-int"
+opflex_access_bridge_default: "br-access"
+opflex_access_bridge: "{{ opflex_access_bridge_default }}"
+
+# OVS tunnel port carrying the VXLAN encapsulated fabric traffic. agent-ovs
+# looks this port up by name and never creates it, so the opflex role does.
+opflex_encap_interface: "{{ opflex_integration_bridge }}_vxlan0"
+
+# Interface presented to OVS for VLAN encapsulated "local external"
+# endpoints, used by VLAN provider networks. Leave it empty unless those are
+# in use: when set it must be the physical uplink and it is added as a port
+# on the integration bridge, alongside - not instead of - the VXLAN tunnel.
+opflex_uplink_native_interface: ""
+
+# Physical networks this agent will bind VLAN segments on. apic_aim refuses
+# a VLAN segment whose physical network is absent from the list the agent
+# reports, so leaving this empty keeps the agent OpFlex only. Setting it
+# also requires the fabric side: a physical domain with a VLAN pool, a
+# host-domain mapping, and host links for the uplink.
+opflex_vlan_networks: ""
+
+########################
+# OpFlex ML2 type driver
+########################
+# Physical networks on which the opflex type driver may allocate segments,
+# rendered into [ml2_type_opflex] on the controllers.
+opflex_ml2_networks: "*"
+
+# VLAN ranges backing VLAN provider networks and the dynamic segments
+# apic_aim allocates for SR-IOV and non-OpFlex hosts, rendered into
+# [ml2_type_vlan] network_vlan_ranges. It has to agree with the VLAN pool
+# bound to the physical domain on APIC. Empty means no VLAN segments can be
+# allocated at all.
+opflex_vlan_ranges: ""
+
+# Directory the packet logging driver writes per-host drop-log configuration
+# into. neutron-server writes <dir>/<host>/openstack.droplogcfg and the OpFlex
+# agent reads it on the compute node, so enabling the Neutron logging API
+# means pointing this at storage both sides can see. The default is the
+# compute-local state directory, which is only correct on an all-in-one.
+opflex_drop_log_dir: "{{ opflex_agent_ovs_state_dir }}/droplog"
+
+opflex_agent_ovs_config_dir: "/etc/opflex-agent-ovs/conf.d"
+opflex_agent_ovs_state_dir: "/var/lib/opflex-agent-ovs"
+opflex_agent_ovs_log_level: "info"

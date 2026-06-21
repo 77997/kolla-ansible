@@ -1,0 +1,24 @@
+{
+    "command": "mcast_daemon --watch {{ opflex_agent_ovs_state_dir }}/mcast/ --log /var/log/kolla/opflex/opflex-mcast-daemon.log --level {{ opflex_agent_ovs_log_level }}",
+    "config_files": [],
+    "directories": [
+        {
+            "path": "/var/log/kolla/opflex",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": true
+        },
+        {
+            "path": "{{ opflex_agent_ovs_state_dir }}/mcast",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": true
+        },
+        {
+            "path": "{{ opflex_agent_ovs_state_dir }}/droplog",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": false
+        }
+    ]
+}

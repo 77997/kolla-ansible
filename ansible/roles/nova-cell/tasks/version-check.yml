@@ -24,14 +24,14 @@
       failed_when: false
       check_mode: false
       run_once: true
-      delegate_to: "{{ groups[service.group] | first }}"
+      delegate_to: "{{ groups[service.group] | first if groups[service.group] else inventory_hostname }}"
 
     - name: Cache new Libvirt version
       ansible.builtin.set_fact:
         libvirt_new_version: "{{ libvirt_version_new.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
       run_once: true
       delegate_facts: true
-      delegate_to: "{{ groups[service.group] | first }}"
+      delegate_to: "{{ groups[service.group] | first if groups[service.group] else inventory_hostname }}"
 
     - name: Get nova_libvirt image info
       ansible.builtin.include_role:

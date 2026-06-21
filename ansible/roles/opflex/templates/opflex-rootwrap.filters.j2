@@ -1,0 +1,8 @@
+# neutron-cisco-apic-host-agent runs lldpctl through neutron's rootwrap
+# (opflexagent/apic_topology.py calls utils.execute(..., run_as_root=True)),
+# and python-opflex-agent ships no filter of its own, so rootwrap refuses the
+# command with "Unauthorized command: lldpctl ... (no filter matched)" and the
+# agent reports no fabric topology at all - while still looking healthy, since
+# it stays connected to RabbitMQ throughout.
+[Filters]
+lldpctl: CommandFilter, /usr/sbin/lldpctl, root

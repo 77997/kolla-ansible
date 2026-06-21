@@ -14,7 +14,15 @@ extension_drivers = {{ neutron_extension_drivers | map(attribute='name') | join(
 {% endif %}
 
 [ml2_type_vlan]
-{% if enable_ironic | bool %}
+{# NOTE: under aci the ranges must always come from opflex_vlan_ranges, which
+   has to match the VLAN pool bound to the physical domain on APIC. Falling
+   through to the ironic branch here would emit ranges derived from
+   neutron_bridge_name, which the fabric knows nothing about - an empty range
+   fails visibly, a wrong one does not. A precheck catches ironic with no
+   ranges set. #}
+{% if neutron_plugin_agent == 'aci' %}
+network_vlan_ranges = {{ opflex_vlan_ranges }}
+{% elif enable_ironic | bool %}
 network_vlan_ranges = {{ neutron_physical_networks }}
 {% else %}
 network_vlan_ranges =
@@ -30,6 +38,11 @@ flat_networks = {{ neutron_physical_networks }}
 [ml2_type_vxlan]
 vni_ranges = 1:1000
 
+{% if neutron_plugin_agent == 'aci' %}
+[ml2_type_opflex]
+opflex_networks = {{ opflex_ml2_networks }}
+{% endif %}
+
 {% if neutron_plugin_agent == 'ovn' %}
 [ml2_type_geneve]
 vni_ranges = 1001:2000
@@ -41,4 +54,18 @@ ovn_sb_connection = {{ ovn_sb_connection_no_relay }}
 ovn_metadata_enabled = true
 enable_distributed_floating_ip = {{ neutron_ovn_distributed_fip | bool }}
 ovn_emit_need_to_frag = true
+{% endif %}
+
+{% if neutron_plugin_agent == 'aci' %}
+[ml2_apic_aim]
+# Make the apic_aim mechanism driver reach Neutron/GBP over the internal
+# endpoint (api-int) instead of the public API. Without this the driver
+# defaults to publicURL (see apic_aim/cache.py).
+enable_neutronclient_internal_ep_interface = True
+{%     if enable_neutron_packet_logging | bool %}
+# Where the packet log driver writes per-host drop-log configuration, as
+# <dir>/<host>/openstack.droplogcfg. neutron-server writes it and the OpFlex
+# agent reads it on the compute, so this has to be storage both can see.
+opflex_drop_log_dir = {{ opflex_drop_log_dir }}
+{%     endif %}
 {% endif %}

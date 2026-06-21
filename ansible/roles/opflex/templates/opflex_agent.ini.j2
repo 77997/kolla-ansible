@@ -1,0 +1,19 @@
+[OPFLEX]
+# NOTE: agent-ovs watches these two directories for the endpoint and service
+# files this agent writes, so both sides are driven off the same variable.
+epg_mapping_dir = {{ opflex_agent_ovs_state_dir }}/endpoints/
+as_mapping_dir = {{ opflex_agent_ovs_state_dir }}/services/
+opflex_networks = *
+{% if opflex_vlan_networks | length > 0 %}
+vlan_networks = {{ opflex_vlan_networks }}
+{% endif %}
+agent_mode = opflex
+
+[OVS]
+integration_bridge = {{ opflex_integration_bridge }}
+local_ip = {{ tunnel_interface_address }}
+datapath_type = {{ ovs_datapath }}
+
+[AGENT]
+polling_interval = 2
+report_interval = 60

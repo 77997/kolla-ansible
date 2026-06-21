@@ -18,6 +18,7 @@
   become: true
   kolla_container:
     action: "remove_volume"
+    container_engine: "{{ kolla_container_engine }}"
     name: grafana
   when: grafana_remove_old_volume | bool
 

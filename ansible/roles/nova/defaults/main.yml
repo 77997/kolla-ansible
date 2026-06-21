@@ -103,11 +103,18 @@ nova_database_shard:
     - user: "{{ nova_api_database_user }}"
       password: "{{ nova_api_database_password }}"
       shard_id: "{{ nova_database_shard_id }}"
+    - user: "{{ nova_cell0_database_user }}"
+      password: "{{ nova_cell0_database_password }}"
+      shard_id: "{{ nova_cell0_database_shard_id }}"
   rules:
     - schema: "{{ nova_api_database_name }}"
       shard_id: "{{ nova_database_shard_id }}"
     - user: "{{ nova_api_database_user }}"
       shard_id: "{{ nova_database_shard_id }}"
+    - schema: "{{ nova_cell0_database_name }}"
+      shard_id: "{{ nova_cell0_database_shard_id }}"
+    - user: "{{ nova_cell0_database_user }}"
+      shard_id: "{{ nova_cell0_database_shard_id }}"
 
 
 ####################

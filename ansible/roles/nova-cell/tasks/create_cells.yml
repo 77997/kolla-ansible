@@ -30,7 +30,13 @@
     - '"already exists" not in nova_cell_create.stdout'
   when:
     - inventory_hostname == groups[nova_conductor.group][0] | default(None)
-    - not nova_cell_settings | bool
+    # NOTE: plain truthiness, NOT "| bool". Ansible's bool filter does not
+    # implement Python truthiness: it only recognises yes/true/1-style values
+    # and coerces any dict to False (with a deprecation warning today, a hard
+    # error from ansible-core 2.23). nova_cell_settings is a dict, so with the
+    # filter this condition is always False and the task never runs - meaning a
+    # changed cell transport_url / database connection is silently never applied.
+    - not nova_cell_settings
 
 - name: Update cell
   vars:
@@ -59,5 +65,5 @@
     - nova_cell_updated.rc != 0
   when:
     - inventory_hostname == groups[nova_conductor.group][0] | default(None)
-    - nova_cell_settings | bool
+    - nova_cell_settings
     - nova_cell_settings.cell_message_queue != nova_cell_rpc_transport_url or nova_cell_settings.cell_database != nova_cell_database_url

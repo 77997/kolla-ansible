@@ -1,0 +1,4 @@
+---
+enable_aci_aim: "{{ neutron_plugin_agent == 'aci' }}"
+
+aci_apic_system_id: "openstack"

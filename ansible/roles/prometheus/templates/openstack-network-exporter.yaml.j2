@@ -1,1 +1,16 @@
 http-listen: "{{ api_interface_address | put_address_in_context('url') }}:{{ prometheus_openstack_network_exporter_port }}"
+{% if neutron_plugin_agent != 'ovn' %}
+# No OVN on this deployment (e.g. ACI/opflex or ML2/OVS): the ovn, ovnnorthd and
+# ovsdbserver collectors read /run/ovn, which is absent here. Enable only the OVS
+# dataplane collectors so each scrape doesn't error against missing OVN sockets.
+collectors:
+  - bridge
+  - coverage
+  - datapath
+  - iface
+  - memory
+  - netvf
+  - pmd_perf
+  - pmd_rxq
+  - vswitch
+{% endif %}

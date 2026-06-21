@@ -285,7 +285,14 @@ disable_group_policy_check_upcall = true
 track_instance_changes = false
 {% endif %}
 
-{% if nova_pci_passthrough_whitelist %}
+{# NOTE: the whitelist enumerates PCI devices present on the host, so it only
+   means anything to nova-compute. Rendering it for the other cell services
+   still makes them validate it at startup - nova-conductor builds a
+   pci.Whitelist while constructing ComputeTaskManager - and an entry that
+   cannot be resolved to a PCI address takes the conductor down with it. That
+   happens on a PowerVM LPAR, where the default physnet mapping points at a
+   virtual ethernet adapter sitting on the VIO bus rather than on PCI. #}
+{% if nova_pci_passthrough_whitelist and service_name.startswith('nova-compute') %}
 [pci]
 passthrough_whitelist = {{ nova_pci_passthrough_whitelist | to_json }}
 {% endif %}

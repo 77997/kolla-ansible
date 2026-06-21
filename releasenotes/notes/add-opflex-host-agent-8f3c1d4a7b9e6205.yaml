@@ -1,0 +1,84 @@
+---
+features:
+  - |
+    The ``opflex`` role now deploys the OpFlex host agent (``agent-ovs``)
+    alongside ``neutron-opflex-agent``, as the ``opflex_agent_ovs``
+    container, together with an ``opflex_mcast_daemon`` container for VXLAN
+    multicast group membership. Previously only the Neutron side of the pair
+    was deployed, so endpoint files were written but no OpFlex session was
+    established and no flows were programmed.
+  - |
+    The agent watches the endpoint, service, SNAT, drop-log, out-of-band and
+    fault directories, sharing the endpoint, service and SNAT volumes with
+    ``neutron-opflex-agent``. The SNAT source is what makes distributed SNAT
+    work for instances without a floating IP, whose host SNAT addresses
+    ``apic_aim`` hands out over RPC.
+  - |
+    The agent configuration is templated from ``opflex_*`` variables. The
+    uplink facing the ACI leaf is set with ``opflex_uplink_interface`` and
+    has no default; the infrastructure VLAN sub-interface carrying the
+    tunnel endpoint address is derived from it and ``opflex_infra_vlan``.
+    The OpFlex proxy and anycast tunnel endpoint are configurable with
+    ``opflex_peer_host`` and ``opflex_remote_ip`` for fabrics that do not
+    use the default infrastructure TEP pool.
+  - |
+    The ``opflex`` role now creates the access bridge and the VXLAN tunnel
+    port on the integration bridge. ``agent-ovs`` resolves both by name and
+    creates neither.
+  - |
+    VLAN provider networks can be bound on OpFlex hosts by setting
+    ``opflex_uplink_native_interface`` and ``opflex_vlan_networks``, which
+    adds the physical uplink to the integration bridge and lets ``apic_aim``
+    bind VLAN segments through the OpFlex agent. This does not require
+    ``enable_neutron_provider_networks``, which under ``neutron_plugin_agent:
+    aci`` would create an external bridge that no agent consumes.
+upgrade:
+  - |
+    Deployments using ``neutron_plugin_agent: aci`` must set
+    ``opflex_uplink_interface`` before deploying or reconfiguring compute
+    nodes. The ``opflex`` role now fails early when it is unset.
+  - |
+    ``neutron_type_drivers`` and ``neutron_tenant_network_types`` now render
+    as ``opflex,local,vlan`` and ``opflex`` under
+    ``neutron_plugin_agent: aci``, matching what ``apic_aim`` is tested
+    against. Existing ACI deployments that carried a ``ml2_conf.ini``
+    override in ``node_custom_config`` to supply the ``opflex`` type driver
+    can drop it. Deployments that were running without one could not bind
+    any port, since ``apic_aim`` binds from ``opflex`` type segments and
+    falls back only to ``vlan``.
+fixes:
+  - |
+    ``neutron_plugin_agent: aci`` now configures the ``opflex`` ML2 type
+    driver. Previously ``type_drivers`` rendered as ``flat,vlan,vxlan`` with
+    ``tenant_network_types = vxlan``, so tenant networks were created as
+    VXLAN segments that neither ``_opflex_bind_port`` nor
+    ``_bind_physical_node`` will bind, and every VM port failed to bind.
+    ``flat`` is deliberately not offered under ``aci``: ``apic_aim`` only
+    programs static paths for VLAN segments, so a flat network can be
+    created but never reaches the fabric.
+  - |
+    The ``opflex`` role now removes the access bridge and the native uplink
+    port again when their settings are cleared, rather than leaving OVS
+    attached to the OpFlex uplink.
+  - |
+    The ``opflex-agent`` restart handler no longer drops the container
+    environment, which previously caused the container to be recreated
+    without ``OPFLEX_ENABLE_DROP_LOG`` and to be flagged as changed on every
+    subsequent run.
+  - |
+    ``neutron-l3-agent`` is no longer deployed under
+    ``neutron_plugin_agent: aci``. ``apic_aim_l3`` replaces the router
+    service plugin and provides no L3 agent scheduler, so nothing answers
+    the agent's startup ``get_host_ha_router_count`` RPC: the agent retried
+    that call indefinitely, never reported its state, and never appeared in
+    ``openstack network agent list``. Routing is done by the fabric's
+    pervasive gateway, and floating IPs and SNAT are programmed on the
+    compute by the OpFlex agent, so nothing is lost. The ACI VPN and port
+    forwarding agents share only the ``neutron-l3-agent`` inventory group
+    and are unaffected.
+  - |
+    All three OpFlex containers now set ``OPFLEX_ENABLE_DROP_LOG``. The
+    image's ``kolla_extend_start`` dereferences it unconditionally and is
+    sourced by a ``start.sh`` running under ``set -o nounset``, so a
+    container that left it unset aborted during startup, before the agent
+    was executed.

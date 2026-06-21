@@ -1,0 +1,15 @@
+---
+- name: Import tasks from config.yml
+  ansible.builtin.import_tasks: config.yml
+
+- name: Import tasks from check-containers.yml
+  ansible.builtin.import_tasks: check-containers.yml
+
+- name: Import tasks from bootstrap_service.yml
+  ansible.builtin.import_tasks: bootstrap_service.yml
+
+- name: Import tasks from provision_domains.yml
+  ansible.builtin.import_tasks: provision_domains.yml
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers

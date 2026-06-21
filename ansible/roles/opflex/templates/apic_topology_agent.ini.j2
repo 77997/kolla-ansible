@@ -1,0 +1,8 @@
+{# NOTE: these have to be PHYSICAL ports facing the leaf - not a bond, which has
+   no LLDP neighbour of its own, and not the infrastructure VLAN sub-interface,
+   since LLDP is untagged on the port. See opflex_host_agent_uplink_ports, which
+   derives the bond members for you. #}
+[apic_host_agent]
+apic_host_uplink_ports = {{ opflex_host_agent_uplink_ports }}
+apic_agent_poll_interval = {{ opflex_host_agent_poll_interval }}
+apic_agent_report_interval = {{ opflex_host_agent_report_interval }}

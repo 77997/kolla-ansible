@@ -1,6 +1,14 @@
 [fwaas]
 enabled = true
+{% if neutron_plugin_agent == 'aci' %}
+driver = aci_useg
+{% else %}
 driver = iptables_v2
+{% endif %}
 
 [service_providers]
+{% if neutron_plugin_agent == 'aci' %}
+service_provider = FIREWALL_V2:aci_useg:gbpservice.neutron.services.fwaas.aim.fwaas_driver:AciUsegFwaasDriver:default
+{% else %}
 service_provider = FIREWALL_V2:fwaas_db:neutron_fwaas.services.firewall.service_drivers.agents.agents.FirewallAgentDriver:default
+{% endif %}

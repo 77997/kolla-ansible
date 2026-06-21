@@ -1,0 +1,43 @@
+{
+    "command": "neutron-cisco-apic-host-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/apic_topology_agent.ini --log-file /var/log/kolla/opflex/apic-host-agent.log",
+    "config_files": [
+        {
+            "source": "{{ container_config_directory }}/neutron.conf",
+            "dest": "/etc/neutron/neutron.conf",
+            "owner": "opflex",
+            "perm": "0600"
+        },
+        {
+            "source": "{{ container_config_directory }}/apic_topology_agent.ini",
+            "dest": "/etc/neutron/apic_topology_agent.ini",
+            "owner": "opflex",
+            "perm": "0600"
+        },
+        {
+            "source": "{{ container_config_directory }}/opflex-rootwrap.filters",
+            "dest": "/etc/neutron/rootwrap.d/opflex-agent.filters",
+            "owner": "root",
+            "perm": "0644"
+        }
+    ],
+    "directories": [
+        {
+            "path": "/etc/neutron/rootwrap.d",
+            "owner": "root:root",
+            "perm": "0755",
+            "recurse": false
+        },
+        {
+            "path": "/var/log/kolla/opflex",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": true
+        },
+        {
+            "path": "{{ opflex_agent_ovs_state_dir }}/tmp",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": false
+        }
+    ]
+}
