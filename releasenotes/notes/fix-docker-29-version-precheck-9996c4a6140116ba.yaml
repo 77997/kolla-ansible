@@ -1,0 +1,6 @@
+---
+fixes:
+  - |
+    Fixed the ``Checking Docker version`` precheck failing with Docker 29 and
+    later, which prefix the version reported by ``docker --version`` with
+    ``v``, for example ``Docker version v29.7.1, build e9452d6``.
