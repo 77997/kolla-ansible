@@ -1,15 +1,15 @@
 ---
+# NOTE: Do not derive this from ansible_facts.python.executable. On a
+# deployment host that is also a target host, that fact is the interpreter
+# Ansible itself runs under, and because this variable is templated it is
+# resolved in the delegating host's context and then executed on delegation
+# targets, where the path need not exist. 'auto_silent' lets interpreter
+# discovery run against whichever host actually executes the module.
 ansible_python_interpreter: >-
   {{
     virtualenv ~ '/bin/python'
     if virtualenv is defined
       and virtualenv is not none
       and virtualenv | length > 0
-    else (
-      ansible_facts.python.executable
-      if ansible_facts.python.executable is defined
-        and ansible_facts.python.executable is not none
-        and ansible_facts.python.executable | length > 0
-      else 'auto_silent'
-    )
+    else 'auto_silent'
   }}

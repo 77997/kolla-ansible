@@ -1,0 +1,7 @@
+---
+fixes:
+  - |
+    Fixed delegated tasks failing with ``The module interpreter ... was not
+    found`` when Kolla Ansible is run from a virtual environment on a
+    deployment host that is also a target host. ``ansible_python_interpreter``
+    is no longer templated from gathered facts.
