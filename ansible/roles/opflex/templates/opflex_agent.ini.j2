@@ -3,6 +3,9 @@
 # files this agent writes, so both sides are driven off the same variable.
 epg_mapping_dir = {{ opflex_agent_ovs_state_dir }}/endpoints/
 as_mapping_dir = {{ opflex_agent_ovs_state_dir }}/services/
+# NOTE: must match opflex.notif.socket-name in the agent-ovs config; neither
+# side's default is reachable from the other. See opflex_agent_ovs_notif_socket.
+opflex_notify_socket_path = {{ opflex_agent_ovs_notif_socket }}
 opflex_networks = *
 {% if opflex_vlan_networks | length > 0 %}
 vlan_networks = {{ opflex_vlan_networks }}

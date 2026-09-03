@@ -166,6 +166,24 @@ opflex_vlan_ranges: ""
 # compute-local state directory, which is only correct on an all-in-one.
 opflex_drop_log_dir: "{{ opflex_agent_ovs_state_dir }}/droplog"
 
+# Unix socket agent-ovs publishes endpoint state changes on, and that
+# neutron-opflex-agent connects to in order to learn an endpoint has been
+# programmed - that is what makes it report the port up, which is the
+# network-vif-plugged event nova waits for before resuming the paused guest.
+#
+# Both defaults are wrong for us and in two different ways. agent-ovs defaults
+# to its compiled-in LOCALSTATEDIR path, /usr/local/var/run/opflex-agent-notif.sock
+# (agent-ovs/lib/Agent.cpp DEF_NOTIF_SOCKET), while neutron-opflex-agent defaults
+# to /var/run/opflex-agent-notif.sock (opflexagent/config.py). Even were the paths
+# equal, /var/run is private to each container, so the listener could never see
+# the socket the publisher bound. Pin both sides here, under the state directory
+# that is already a named volume shared by the two containers.
+#
+# Left unset, every instance reaches ACTIVE in neutron but stays paused in
+# libvirt until nova gives up with InstanceEventTimeout after vif_plugging_timeout
+# and tears the domain down, and the endpoints/ directory stays empty.
+opflex_agent_ovs_notif_socket: "{{ opflex_agent_ovs_state_dir }}/notif/opflex-agent-notif.sock"
+
 opflex_agent_ovs_config_dir: "/etc/opflex-agent-ovs/conf.d"
 opflex_agent_ovs_state_dir: "/var/lib/opflex-agent-ovs"
 opflex_agent_ovs_log_level: "info"

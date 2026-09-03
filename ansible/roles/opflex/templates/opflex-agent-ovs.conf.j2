@@ -18,6 +18,10 @@
         "inspector": {
             "enabled": {{ 'true' if opflex_agent_ovs_inspector_enabled | bool else 'false' }},
             "socket-name": "{{ opflex_agent_ovs_inspector_socket }}"
+        },
+        "notif": {
+            "enabled": true,
+            "socket-name": "{{ opflex_agent_ovs_notif_socket }}"
         }
     },
     "endpoint-sources": {
