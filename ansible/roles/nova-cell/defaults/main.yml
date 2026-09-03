@@ -703,3 +703,10 @@ nova_multi_compute_ironic_config: []
 # Copy certificates
 ###################
 nova_cell_copy_certs: "{{ kolla_copy_ca_into_containers | bool or nova_cell_database_enable_tls_internal | bool }}"
+
+# POWER8 KVM-HV requires whole-core mode (all secondary threads offline) or qemu
+# refuses to run any vCPU. Enable on POWER8 powernv compute hosts. Not needed on
+# POWER9 and later. Applied via a systemd unit rather than the smt-enabled=off
+# kernel parameter, which hangs powernv at boot -- see the unit template.
+nova_compute_disable_smt: false
+nova_compute_ppc64_cpu_path: "/usr/sbin/ppc64_cpu"
