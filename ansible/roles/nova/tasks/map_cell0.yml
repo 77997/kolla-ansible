@@ -77,13 +77,13 @@
       failed_when:
         - nova_cell0_updated.rc != 0
       when:
-        # NOTE: plain truthiness, NOT "| bool". Ansible's bool filter does not
-        # implement Python truthiness: it only recognises yes/true/1-style values
-        # and coerces any dict to False (with a deprecation warning today, a hard
-        # error from ansible-core 2.23). nova_cell_settings is a dict, so with the
-        # filter this condition is always False and the task never runs - meaning a
-        # changed cell transport_url / database connection is silently never applied.
-        - nova_cell_settings
+        # NOTE: test the dict's length, not "| bool" and not bare truthiness.
+        # "| bool" coerces any dict to False, so the task would never run and a
+        # changed cell database connection would silently never be applied. A
+        # bare dict has the right truthiness but is not a boolean, which
+        # ansible-core 2.19 rejects: "Conditional result (True) was derived
+        # from value of type 'dict'".
+        - nova_cell_settings | length > 0
         - nova_cell_settings.cell_database != nova_cell0_connection
 
 - name: Include tasks from bootstrap_service.yml
