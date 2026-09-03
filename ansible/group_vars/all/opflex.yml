@@ -158,7 +158,17 @@ opflex_access_bridge: "{{ opflex_integration_bridge }}"
 # OVS tunnel port carrying the VXLAN encapsulated fabric traffic. agent-ovs
 # looks this port up by name and never creates it, so the opflex role does.
 # It belongs on agent-ovs's integration bridge, i.e. the fabric bridge.
-opflex_encap_interface: "{{ opflex_fabric_bridge }}_vxlan0"
+#
+# NOTE: must be <= 15 characters. Linux caps interface names at IFNAMSIZ-1, so
+# a longer name is accepted by OVSDB but reported truncated over OpenFlow -
+# "br-fabric_vxlan0" (16) appears as "br-fabric_vxlan". agent-ovs resolves this
+# port by name through the OpenFlow port mapper, so the lookup then fails, no
+# flow ever outputs to the tunnel, and the port sits at rx_packets=0
+# tx_packets=0 while local delivery still works. Nothing logs an error: the
+# agent programs everything else, endpoints register over the OpFlex control
+# channel, and instances get their addresses from the locally generated RA -
+# only traffic to the fabric silently goes nowhere.
+opflex_encap_interface: "fabric_vxlan0"
 
 # Interface presented to OVS for VLAN encapsulated "local external"
 # endpoints, used by VLAN provider networks. Leave it empty unless those are
