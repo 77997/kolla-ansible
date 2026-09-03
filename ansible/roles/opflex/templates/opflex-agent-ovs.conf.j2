@@ -67,6 +67,14 @@
                 }
 {% endif %}
             },
+            "forwarding": {
+                "virtual-router": {
+                    "enabled": true,
+                    "ipv6": {
+                        "router-advertisement": {{ 'true' if opflex_agent_ovs_router_advertisement | bool else 'false' }}
+                    }
+                }
+            },
             "flowid-cache-dir": "{{ opflex_agent_ovs_state_dir }}/ids",
             "mcast-group-file": "{{ opflex_agent_ovs_state_dir }}/mcast/opflex-groups.json",
             "dns-cache-dir": "{{ opflex_agent_ovs_state_dir }}/dns"

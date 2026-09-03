@@ -184,6 +184,25 @@ opflex_drop_log_dir: "{{ opflex_agent_ovs_state_dir }}/droplog"
 # and tears the domain down, and the endpoints/ directory stays empty.
 opflex_agent_ovs_notif_socket: "{{ opflex_agent_ovs_state_dir }}/notif/opflex-agent-notif.sock"
 
+# Whether agent-ovs sends IPv6 Router Advertisements for the bridge domain
+# subnet, i.e. whether it acts as the SLAAC default router for instances.
+#
+# agent-ovs defaults forwarding.virtual-router.enabled to true but
+# forwarding.virtual-router.ipv6.router-advertisement to FALSE
+# (ovs/OVSRenderer.cpp setProperties). Note the OVSRenderer constructor
+# initialises routerAdv(true), so reading the constructor alone is misleading -
+# the property default is what applies whenever the key is absent, and it is
+# false. The agent then answers neighbour solicitations but never advertises a
+# router, so an instance on a slaac subnet only ever configures a link-local
+# address, gets no default route, and systemd-networkd-wait-online fails. There
+# is no error anywhere: neutron shows the port ACTIVE with its allocated
+# address, the endpoint file is correct, and the RS packets even hit the
+# icmp_type=133 flow - the reply simply is never generated.
+#
+# Turn it on: this deployment is IPv6-only, so without RAs no instance can
+# reach the network at all.
+opflex_agent_ovs_router_advertisement: true
+
 opflex_agent_ovs_config_dir: "/etc/opflex-agent-ovs/conf.d"
 opflex_agent_ovs_state_dir: "/var/lib/opflex-agent-ovs"
 opflex_agent_ovs_log_level: "info"
