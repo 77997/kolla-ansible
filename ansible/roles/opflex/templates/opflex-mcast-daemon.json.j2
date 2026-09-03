@@ -1,5 +1,18 @@
+{# NOTE: --interface is not optional on an IPv6-only host. Without it
+   MulticastListener joins with INADDR_ANY (MulticastListener.cpp, the
+   interface_addrs_v4.empty() branch), which asks the kernel to choose an
+   interface from the IPv4 default route. These computes have no IPv4 default
+   route - their only IPv4 address is the infra-VLAN TEP - so every join fails
+   with "Could not join group <grp>: No such device". The fabric still hands
+   out the VXLAN flood groups, the agent still writes them to mcast/, and
+   nothing else logs an error, but BUM traffic never flows: the flood domain
+   carries no ARP/ND or unknown unicast, so the leaf never learns any endpoint
+   and "show system internal epm vlan <id>" stays at Endpoint Count 0 while
+   the EPG, BD, VRF, contracts and endpoint declarations all look correct.
+   Pin the join to the infra-VLAN interface, which is the only one that can
+   carry it. #}
 {
-    "command": "mcast_daemon --watch {{ opflex_agent_ovs_state_dir }}/mcast/ --log /var/log/kolla/opflex/opflex-mcast-daemon.log --level {{ opflex_agent_ovs_log_level }}",
+    "command": "mcast_daemon --watch {{ opflex_agent_ovs_state_dir }}/mcast/ --interface {{ opflex_uplink_vlan_interface }} --log /var/log/kolla/opflex/opflex-mcast-daemon.log --level {{ opflex_agent_ovs_log_level }}",
     "config_files": [],
     "directories": [
         {
