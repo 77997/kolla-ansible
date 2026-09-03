@@ -11,6 +11,9 @@ opflex_networks = *
 vlan_networks = {{ opflex_vlan_networks }}
 {% endif %}
 agent_mode = opflex
+# NOTE: the bridge this agent creates for the OpFlex dataplane and patches
+# br-int to. agent-ovs is pointed at the same bridge as its int-bridge-name.
+fabric_bridge = {{ opflex_fabric_bridge }}
 
 [OVS]
 integration_bridge = {{ opflex_integration_bridge }}

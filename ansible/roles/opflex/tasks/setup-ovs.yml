@@ -71,19 +71,68 @@
     - opflex_access_bridge | length > 0
     - enable_ovs_dpdk | bool
 
+# NOTE: neutron-opflex-agent creates the fabric bridge itself, but agent-ovs
+# and the tunnel port below both need it to exist before either agent starts,
+# and the two containers come up in no guaranteed order.
+
+- name: Create the OpFlex fabric bridge on OpenvSwitch
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_fabric_bridge }}"
+      state: present
+      fail_mode: secure
+  when: inventory_hostname in groups['compute']
+
+- name: Set the OpFlex fabric bridge datapath type to netdev for DPDK
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Bridge
+      record: "{{ opflex_fabric_bridge }}"
+      col: datapath_type
+      value: netdev
+  when:
+    - inventory_hostname in groups['compute']
+    - enable_ovs_dpdk | bool
+
+# NOTE: the previous topology put agent-ovs on br-int and created a separate
+# br-access. Neither is used now: agent-ovs enforces security groups on the
+# bridge holding the tap, which is br-int. Remove the leftover bridge so a
+# node upgraded in place does not keep an orphan.
+
+- name: Remove the obsolete standalone OpFlex access bridge
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_access_bridge_default }}"
+      state: absent
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_access_bridge != opflex_access_bridge_default
+
 # NOTE: agent-ovs resolves the tunnel port by name through the OVS port
 # mapper and never creates it, so it has to exist before the agent starts.
 # The interface stays in error state between being added and being given its
 # type, which is why the type is set immediately below.
 
-- name: Create the OpFlex VXLAN tunnel port on the integration bridge
+- name: Create the OpFlex VXLAN tunnel port on the fabric bridge
   become: true
   kolla_toolbox:
     container_engine: "{{ kolla_container_engine }}"
     user: root
     module_name: openvswitch_port
     module_args:
-      bridge: "{{ opflex_integration_bridge }}"
+      bridge: "{{ opflex_fabric_bridge }}"
       port: "{{ opflex_encap_interface }}"
       state: present
   when:

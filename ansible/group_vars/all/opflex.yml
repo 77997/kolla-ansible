@@ -120,17 +120,45 @@ opflex_agent_ovs_rundir: "/run/openvswitch"
 opflex_agent_ovs_libdir: "/usr/lib/{{ 'powerpc64le-linux-gnu' if ansible_facts.architecture == 'ppc64le' else ansible_facts.architecture ~ '-linux-gnu' }}"
 opflex_agent_ovs_ld_preload: "{{ opflex_agent_ovs_libdir }}/libunbound.so.8 {{ opflex_agent_ovs_libdir }}/libcap-ng.so.0"
 
-# OVS bridges owned by agent-ovs. Security groups are enforced on the access
-# bridge; setting it to an empty string disables the bridge, and with it
-# datapath security-group enforcement. The default name is kept separately
-# so the role can still remove the bridge once the setting is cleared.
+# OVS bridges. This is a three bridge topology and the two agents name the
+# bridges from opposite ends, which is easy to get backwards:
+#
+#   br-int     nova/os-vif plugs the instance tap here, and it is
+#              neutron-opflex-agent's [OVS] integration_bridge.
+#   br-fabric  the OpFlex dataplane, created by neutron-opflex-agent from
+#              [OPFLEX] fabric_bridge. This is the bridge AGENT-OVS must be
+#              told is its "integration" bridge.
+#
+# neutron-opflex-agent joins the two with a patch pair (ovs_manager.py
+# add_patch_ports) and writes the endpoint file accordingly:
+#
+#   "interface-name":           qpi<port>  -> on br-fabric   (agent-ovs int)
+#   "access-interface":         tap<port>  -> on br-int      (agent-ovs access)
+#   "access-uplink-interface":  qpf<port>  -> on br-int      (agent-ovs access)
+#
+# Note ovs_manager unpacks that pair as "port_f, port_i" while the helper
+# returns (qpi, qpf), so the names read backwards in the source: qpf lands on
+# br-int and qpi on br-fabric.
+#
+# Pointing agent-ovs at br-int instead makes its port mapper unable to resolve
+# any endpoint's interface-name. Everything still looks healthy - flows are
+# programmed, the port is ACTIVE, the endpoint file is correct - but anything
+# that has to transmit out of an endpoint port silently does nothing, because
+# the lookup returns OFPP_NONE and the caller just skips. IPv6 router
+# advertisements are the visible casualty: AdvertManager logs "Sending all
+# router advertisements" but never "Sent router advertisement for <epg>", and
+# instances get no SLAAC address.
 opflex_integration_bridge: "br-int"
+opflex_fabric_bridge: "br-fabric"
+# agent-ovs enforces security groups on the bridge holding the instance tap,
+# which in this topology is br-int.
 opflex_access_bridge_default: "br-access"
-opflex_access_bridge: "{{ opflex_access_bridge_default }}"
+opflex_access_bridge: "{{ opflex_integration_bridge }}"
 
 # OVS tunnel port carrying the VXLAN encapsulated fabric traffic. agent-ovs
 # looks this port up by name and never creates it, so the opflex role does.
-opflex_encap_interface: "{{ opflex_integration_bridge }}_vxlan0"
+# It belongs on agent-ovs's integration bridge, i.e. the fabric bridge.
+opflex_encap_interface: "{{ opflex_fabric_bridge }}_vxlan0"
 
 # Interface presented to OVS for VLAN encapsulated "local external"
 # endpoints, used by VLAN provider networks. Leave it empty unless those are
