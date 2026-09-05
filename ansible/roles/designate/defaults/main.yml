@@ -200,7 +200,7 @@ designate_mdns_enable_healthchecks: "{{ enable_container_healthchecks }}"
 designate_mdns_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
 designate_mdns_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
 designate_mdns_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
-designate_mdns_healthcheck_test: ["CMD-SHELL", "healthcheck_port designate-mdns {{ om_rpc_port }}"]
+designate_mdns_healthcheck_test: ["CMD-SHELL", "healthcheck_listen designate-mdns {{ designate_mdns_port }}"]
 designate_mdns_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
 designate_mdns_healthcheck:
   interval: "{{ designate_mdns_healthcheck_interval }}"
