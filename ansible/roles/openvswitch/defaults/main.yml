@@ -104,3 +104,20 @@ openvswitch_ovs_vsctl_wrapper_enabled: false
 openvswitch_system_id: "{{ ansible_facts.hostname }}"
 openvswitch_hostname: "{{ ansible_facts.fqdn }}"
 openvswitch_hw_offload: "no"
+
+# Under plugin agents that never run neutron-openvswitch-agent -- 'aci' being the
+# case here -- nothing creates the integration bridge. The DHCP agent still runs
+# though, and with no interface_driver configured neutron falls back to the OVS
+# driver, whose integration_bridge defaults to br-int. plug_new() then raises
+# BridgeDoesNotExist on every network, the agent never finishes a sync, and it
+# retries about once a second forever (measured: 1.3M ERROR lines, ~2.6 GB/day of
+# logs). Creating the bridge lets the plug succeed and stops the loop.
+#
+# The bridge is deliberately a dead end: no uplink port and fail_mode=secure, so
+# with no controller programming flows it forwards nothing. Under ACI, DHCP is
+# answered compute-locally by agent-ovs; the dnsmasq instance here never serves a
+# packet. What matters is that the network:dhcp port keeps existing, because
+# apic_aim's rpc.py reads it for dhcp_server_ips and as the dns_nameservers
+# fallback.
+openvswitch_integration_bridge: "br-int"
+openvswitch_ensure_integration_bridge: "{{ neutron_plugin_agent == 'aci' }}"

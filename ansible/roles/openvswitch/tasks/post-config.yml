@@ -51,3 +51,16 @@
   when:
     - inventory_hostname in groups["network"]
       or (inventory_hostname in groups["compute"] and computes_need_external_bridge | bool )
+
+- name: Ensuring OVS integration bridge exists
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ openvswitch_integration_bridge }}"
+      fail_mode: secure
+  when:
+    - openvswitch_ensure_integration_bridge | bool
+    - inventory_hostname in groups["network"]
