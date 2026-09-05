@@ -23,7 +23,7 @@ rpc_state_report_workers = {{ openstack_service_rpc_workers }}
 
 state_path = /var/lib/neutron/kolla
 
-{% if neutron_plugin_agent == "openvswitch" or (neutron_plugin_agent == "ovn" and neutron_ovn_dhcp_agent | bool) %}
+{% if neutron_plugin_agent == "openvswitch" or (neutron_plugin_agent == "ovn" and neutron_ovn_dhcp_agent | bool) or neutron_plugin_agent == "aci" %}
 interface_driver = openvswitch
 {% endif %}
 
@@ -224,4 +224,9 @@ admin_user_name = {{ infoblox_admin_user_name }}
 admin_password = {{ infoblox_admin_password }}
 wapi_version = {{ infoblox_wapi_version }}
 wapi_max_results = {{ infoblox_wapi_max_results }}
+{% endif %}
+
+{% if neutron_plugin_agent == 'aci' %}
+[ovs]
+integration_bridge = {{ neutron_ovs_integration_bridge }}
 {% endif %}

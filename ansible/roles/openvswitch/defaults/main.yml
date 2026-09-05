@@ -119,5 +119,5 @@ openvswitch_hw_offload: "no"
 # packet. What matters is that the network:dhcp port keeps existing, because
 # apic_aim's rpc.py reads it for dhcp_server_ips and as the dns_nameservers
 # fallback.
-openvswitch_integration_bridge: "br-int"
+openvswitch_integration_bridge: "{{ neutron_ovs_integration_bridge }}"
 openvswitch_ensure_integration_bridge: "{{ neutron_plugin_agent == 'aci' }}"

@@ -77,3 +77,9 @@ neutron_public_endpoint: "{{ neutron_external_fqdn | kolla_url(public_protocol, 
 neutron_server_port: "9696"
 neutron_server_listen_port: "{{ neutron_server_port }}"
 neutron_server_public_port: "{{ haproxy_single_external_frontend_public_port if haproxy_single_external_frontend | bool else neutron_server_port }}"
+
+# The OVS integration bridge the DHCP agent's interface driver plugs into. Under
+# neutron_plugin_agent: aci no neutron-openvswitch-agent runs, so the openvswitch
+# role creates this bridge itself and neutron.conf names it explicitly rather
+# than relying on neutron's built-in default.
+neutron_ovs_integration_bridge: "br-int"
