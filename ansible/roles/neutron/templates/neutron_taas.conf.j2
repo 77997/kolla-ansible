@@ -1,6 +1,14 @@
 [service_providers]
+{% if neutron_plugin_agent == 'aci' %}
+service_provider = TAAS:AIM:gbpservice.neutron.services.taas.aim.taas_driver:AimTaasServiceDriver:default
+{% else %}
 service_provider = TAAS:TAAS:neutron_taas.services.taas.service_drivers.taas_rpc.TaasRpcDriver:default
+{% endif %}
 
 [taas]
+{% if neutron_plugin_agent == 'aci' %}
+driver = gbpservice.neutron.services.taas.aim.taas_driver.AimTaasServiceDriver
+{% else %}
 driver = neutron_taas.services.taas.drivers.linux.ovs_taas.OvsTaasDriver
+{% endif %}
 enabled = true

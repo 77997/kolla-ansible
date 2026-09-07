@@ -170,6 +170,8 @@ skyline_system_admin_roles:
 skyline_system_reader_roles:
   - system_reader
 skyline_keystone_url: "{{ keystone_internal_url }}/v3/"
+# Keystone address the browser is sent to for SSO; skyline-apiserver itself keeps skyline_keystone_url.
+skyline_sso_keystone_url: "{{ keystone_public_url }}/v3/"
 skyline_session_name: session
 skyline_reclaim_instance_interval: 604800
 

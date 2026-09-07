@@ -13,3 +13,16 @@
   roles:
     - role: openstack.kolla.baremetal
       tags: baremetal
+
+- name: Apply role host-watchdog
+  hosts: compute
+  serial: '{{ kolla_serial|default("0") }}'
+  gather_facts: false
+  max_fail_percentage: >-
+    {{ host_watchdog_max_fail_percentage |
+       default(kolla_max_fail_percentage) |
+       default(100) }}
+  roles:
+    - role: host-watchdog
+      tags: host-watchdog
+      when: enable_host_watchdog | bool

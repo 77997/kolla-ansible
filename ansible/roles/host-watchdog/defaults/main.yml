@@ -1,0 +1,5 @@
+---
+# Timeout systemd sets on the BMC watchdog and feeds it within. The BMC resets
+# a host whose PID 1 stops running for this long, so it has to leave a kernel
+# crash dump time to be written.
+host_watchdog_runtime_watchdog_sec: "10min"

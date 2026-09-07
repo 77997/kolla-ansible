@@ -134,7 +134,7 @@
     service: "{{ keystone_services['keystone'] }}"
     service_name: "keystone"
     service_uwsgi_config_host: >-
-      {{ '127.0.0.1' if enable_keystone_federation | bool
+      {{ keystone_wsgi_socket_host if enable_keystone_federation | bool
       else api_interface_address | put_address_in_context('url') }}
     service_uwsgi_config_http_port: "{{ keystone_listen_port }}"
     service_uwsgi_config_module: "{{ service.wsgi }}"

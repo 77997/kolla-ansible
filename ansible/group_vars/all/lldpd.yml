@@ -1,0 +1,2 @@
+---
+enable_lldpd: "{{ neutron_plugin_agent == 'aci' }}"

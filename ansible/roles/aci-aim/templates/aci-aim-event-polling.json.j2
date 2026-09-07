@@ -1,0 +1,24 @@
+{
+    "command": "aim-event-service-polling --config-file /etc/aim/aim.conf",
+    "config_files": [
+        {
+            "source": "{{ container_config_directory }}/aim.conf",
+            "dest": "/etc/aim/aim.conf",
+            "owner": "aim",
+            "perm": "0600"
+        },
+        {
+            "source": "{{ container_config_directory }}/aim.conf",
+            "dest": "/etc/aim/aimctl.conf",
+            "owner": "aim",
+            "perm": "0600"
+        }
+    ],
+    "permissions": [
+        {
+            "path": "/var/log/kolla/aim",
+            "owner": "aim:aim",
+            "recurse": true
+        }
+    ]
+}

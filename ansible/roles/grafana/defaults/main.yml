@@ -64,8 +64,9 @@ grafana_data_sources:
       access: "proxy"
       url: "{{ opensearch_internal_endpoint }}"
       jsonData:
-        flavor: "OpenSearch"
-        database: "{{ opensearch_log_index_prefix }}-*"
+        flavor: "opensearch"
+        database: "[{{ opensearch_log_index_prefix }}-]YYYY.MM.DD"
+        interval: "Daily"
         version: "2.11.1"
         timeField: "@timestamp"
         logLevelField: "log_level"

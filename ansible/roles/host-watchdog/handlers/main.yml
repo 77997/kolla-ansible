@@ -1,0 +1,5 @@
+---
+- name: Update initramfs
+  become: true
+  ansible.builtin.command: "update-initramfs -u -k {{ ansible_facts.kernel }}"
+  changed_when: true

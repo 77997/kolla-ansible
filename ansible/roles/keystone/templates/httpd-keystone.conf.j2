@@ -43,7 +43,7 @@ LogLevel info
     ErrorLog "{{ keystone_log_dir }}/keystone-apache-public-error.log"
     LogFormat "%{X-Forwarded-For}i %l %u %t \"%r\" %>s %b %D \"%{Referer}i\" \"%{User-Agent}i\"" logformat
     CustomLog "{{ keystone_log_dir }}/keystone-apache-public-access.log" logformat
-    ProxyPass / "uwsgi://localhost:{{ keystone_wsgi_socket_port }}/"
+    ProxyPass / "uwsgi://{{ keystone_wsgi_socket_host }}:{{ keystone_wsgi_socket_port }}/"
 
 {% if keystone_enable_tls_backend | bool %}
     SSLEngine on
@@ -70,7 +70,7 @@ LogLevel info
     OIDCRedirectURI {{ keystone_public_url }}/redirect_uri
 {%     if enable_memcached | bool and keystone_oidc_enable_memcached | bool %}
     OIDCCacheType memcache
-    OIDCMemCacheServers "{% for host in groups['memcached'] %}{{ 'api' | kolla_address(host) | put_address_in_context('memcache') }}:{{ memcached_port }}{% if not loop.last %} {% endif %}{% endfor %}"
+    OIDCMemCacheServers "{% for host in groups['memcached'] %}{{ 'api' | kolla_address(host) | put_address_in_context('url') }}:{{ memcached_port }}{% if not loop.last %} {% endif %}{% endfor %}"
 {%     endif %}
 {%     for key, value in keystone_federation_oidc_additional_options.items() %}
     {{ key }} {{ value }}

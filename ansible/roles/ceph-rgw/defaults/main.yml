@@ -48,10 +48,6 @@ ceph_rgw_haproxy_healthcheck: "check inter 2000 rise 2 fall 5"
 # Whether to register Ceph RadosGW swift-compatible endpoints in Keystone.
 enable_ceph_rgw_keystone: "{{ enable_ceph_rgw | bool }}"
 
-# Enable/disable ceph-rgw compatibility with OpenStack Swift.
-# This should match the configuration used by Ceph RadosGW.
-ceph_rgw_swift_compatibility: false
-
 # Enable/disable including the account (project) in the endpoint URL. This
 # allows for cross-project and public object access.
 # This should match the 'rgw_swift_account_in_url' config option used by Ceph

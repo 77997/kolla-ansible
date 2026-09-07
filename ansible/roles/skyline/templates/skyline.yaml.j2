@@ -88,6 +88,13 @@ openstack:
 {% endif %}
   sso_enabled: {{ skyline_enable_sso | bool }}
 {% if skyline_enable_sso | bool %}
+  sso_identity_providers:
+{%     for idp in keystone_identity_providers | selectattr('protocol', 'equalto', 'openid') %}
+    - label: {{ idp.public_name | to_json }}
+      name: {{ idp.name | to_json }}
+      protocol: {{ idp.protocol | to_json }}
+{%     endfor %}
+  sso_keystone_url: {{ skyline_sso_keystone_url | to_json }}
   sso_protocols:
     - openid
   sso_region: {{ openstack_region_name }}

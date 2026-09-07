@@ -19,3 +19,49 @@
     volumes: "{{ neutron_server.volumes }}"
   run_once: true
   delegate_to: "{{ groups[neutron_server.group][0] }}"
+
+- name: Running AIM database migration
+  vars:
+    neutron_server: "{{ neutron_services['neutron-server'] }}"
+  become: true
+  kolla_container:
+    action: "start_container"
+    common_options: "{{ docker_common_options }}"
+    detach: false
+    environment:
+      KOLLA_CONFIG_STRATEGY: "{{ config_strategy }}"
+    image: "{{ neutron_server.image }}"
+    labels:
+      BOOTSTRAP:
+    name: "bootstrap_aim"
+    restart_policy: oneshot
+    volumes: "{{ neutron_server.volumes }}"
+    command: >
+      bash -c 'sudo -E kolla_set_configs &&
+      aimctl -c /etc/neutron/neutron.conf db-migration upgrade'
+  run_once: true
+  delegate_to: "{{ groups[neutron_server.group][0] }}"
+  when: neutron_plugin_agent == 'aci'
+
+- name: Running GBP database migration
+  vars:
+    neutron_server: "{{ neutron_services['neutron-server'] }}"
+  become: true
+  kolla_container:
+    action: "start_container"
+    common_options: "{{ docker_common_options }}"
+    detach: false
+    environment:
+      KOLLA_CONFIG_STRATEGY: "{{ config_strategy }}"
+    image: "{{ neutron_server.image }}"
+    labels:
+      BOOTSTRAP:
+    name: "bootstrap_gbp"
+    restart_policy: oneshot
+    volumes: "{{ neutron_server.volumes }}"
+    command: >
+      bash -c 'sudo -E kolla_set_configs &&
+      gbp-db-manage --config-file /etc/neutron/neutron.conf upgrade heads'
+  run_once: true
+  delegate_to: "{{ groups[neutron_server.group][0] }}"
+  when: neutron_plugin_agent == 'aci'

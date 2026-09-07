@@ -1,0 +1,62 @@
+[DEFAULT]
+debug = {{ aci_aim_logging_debug }}
+transport_url = {{ rpc_transport_url }}
+apic_system_id = {{ aci_apic_system_id }}
+
+[database]
+connection = mysql+pymysql://{{ aci_aim_database_user }}:{{ aci_aim_database_password }}@{{ aci_aim_database_address }}/{{ aci_aim_database_name }}
+connection_recycle_time = {{ database_connection_recycle_time }}
+max_pool_size = {{ database_max_pool_size }}
+max_retries = -1
+
+[aim]
+aim_system_id = {{ aci_aim_system_id | default('openstack_aid') }}
+agent_down_time = 75
+poll_config = False
+unix_socket_path = /var/lib/aim/events/aid.sock
+
+[apic]
+apic_hosts = {{ aci_apic_hosts }}
+apic_username = {{ aci_apic_username }}
+apic_password = {{ aci_apic_password }}
+apic_use_ssl = {{ aci_apic_use_ssl | default('True') }}
+apic_provision_infra = {{ aci_apic_provision_infra | bool }}
+{% if aci_apic_entity_profile | length > 0 %}
+apic_entity_profile = {{ aci_apic_entity_profile }}
+{% endif %}
+{% if aci_vmm_domain_name | length > 0 %}
+
+[apic_vmdom:{{ aci_vmm_domain_name }}]
+apic_vmm_type = OpenStack
+encap_mode = {{ aci_vmm_encap_mode }}
+vmm_controller_host = {{ aci_vmm_controller_host }}
+{%     if aci_vmm_vlan_ranges | length > 0 %}
+vlan_ranges = {{ aci_vmm_vlan_ranges }}
+{%     endif %}
+{%     if aci_vmm_mcast_ranges | length > 0 %}
+mcast_ranges = {{ aci_vmm_mcast_ranges }}
+{%     endif %}
+{%     if aci_vmm_multicast_address | length > 0 %}
+multicast_address = {{ aci_vmm_multicast_address }}
+{%     endif %}
+{%     if aci_vmm_openstack_user | length > 0 %}
+openstack_user = {{ aci_vmm_openstack_user }}
+{%     endif %}
+{%     if aci_vmm_openstack_password | length > 0 %}
+openstack_password = {{ aci_vmm_openstack_password }}
+{%     endif %}
+{% endif %}
+
+[oslo_messaging_rabbit]
+use_queue_manager = true
+heartbeat_in_pthread = false
+{% if om_enable_rabbitmq_tls | bool %}
+ssl = true
+ssl_ca_file = {{ om_rabbitmq_cacert }}
+{% endif %}
+rabbit_quorum_queue = true
+{% if om_enable_rabbitmq_stream_fanout | bool %}
+rabbit_stream_fanout = true
+rabbit_qos_prefetch_count = {{ om_rabbitmq_qos_prefetch_count }}
+{% endif %}
+rabbit_transient_quorum_queue = true

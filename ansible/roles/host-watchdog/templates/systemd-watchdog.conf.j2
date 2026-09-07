@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+#
+# systemd feeds the BMC watchdog that ipmi_watchdog registers at boot, so the
+# BMC resets the host when PID 1 stops running. The timeout leaves a kernel
+# crash dump time to be written before the reset.
+
+[Manager]
+RuntimeWatchdogSec={{ host_watchdog_runtime_watchdog_sec }}

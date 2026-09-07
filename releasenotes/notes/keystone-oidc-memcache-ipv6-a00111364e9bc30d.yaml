@@ -1,0 +1,14 @@
+---
+fixes:
+  - |
+    With Keystone federation over OpenID Connect and memcached enabled,
+    ``keystone-httpd`` now names IPv6 memcached servers as
+    ``[address]:port`` in ``OIDCMemCacheServers``, the form Apache's
+    memcache client parses, rather than ``inet6:[address]:port``, which
+    mod_auth_openidc looked up as a host name.
+upgrade:
+  - |
+    Reaching IPv6 memcached servers from ``keystone-httpd`` also needs an
+    APR-util whose ``apr_memcache`` supports IPv6, 1.6.4 or later, in the
+    ``httpd`` image. Debian trixie's APR-util 1.6.3 resolves and connects
+    over IPv4 only.

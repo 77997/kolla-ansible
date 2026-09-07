@@ -1,0 +1,387 @@
+---
+enable_opflex: "{{ neutron_plugin_agent == 'aci' }}"
+
+########################
+# OpFlex host agent
+########################
+# Encapsulation used between the OpFlex hosts and the fabric. This has to
+# agree with the encapsulation of the VMM domain, hence the default.
+opflex_encap_mode: "{{ aci_vmm_encap_mode | default('vxlan') }}"
+
+# Physical interface facing the ACI leaf. There is no useful default for
+# this - set it per host in the inventory, or here when every OpFlex host is
+# cabled the same way.
+opflex_uplink_interface: ""
+
+# The fabric infrastructure VLAN. It is tagged on the uplink and carries
+# both the OpFlex session and the tunnel endpoint address, which APIC hands
+# out over DHCP.
+opflex_infra_vlan: 4093
+
+# Interface holding the tunnel endpoint address. agent-ovs reads the address
+# straight from the kernel rather than from OVS, so this must be an ordinary
+# netdev on the host and must never be enslaved to a bridge.
+opflex_uplink_vlan_interface: "{{ opflex_uplink_interface }}.{{ opflex_infra_vlan }}"
+
+# Route that carries VXLAN encapsulated BUM traffic out of the infrastructure
+# VLAN interface. The fabric allocates flood groups out of pools held on APIC
+# and reallocates them as bridge domains and endpoint groups come and go, so
+# this covers the whole multicast range rather than tracking individual groups.
+# Destination, proto and metric match what Cisco installs on an OpFlex host in
+# aci-containers pkg/hostagent/opflex.go.
+opflex_mcast_route_destination: "224.0.0.0/4"
+opflex_mcast_route_metric: 401
+
+# Whether to persist that route in the host's network configuration. Leaving
+# this true makes a deploy fail rather than silently leave a host that works
+# until it next reboots. Set it to false only if you are persisting the route
+# by some other means.
+opflex_mcast_route_persist: true
+
+# How many fabric flood groups this host can join. mcast_daemon holds one IGMP
+# membership per group, so igmp_max_memberships caps how many bridge domains an
+# OpFlex compute can receive BUM traffic for; the kernel default is 20. Cisco
+# ships this in their agent RPM but not in their Debian packaging or container
+# image, so a container deployment on a Debian-family host runs at the default.
+#
+# net.core.optmem_max is retired rather than dropped so the value earlier
+# releases wrote is removed from the managed sysctl file. It is on the join path
+# - each membership is sock_kmalloc'd against that budget - but this kernel
+# defaults to 131072, which at sizeof(struct ip_mc_socklist) affords far more
+# groups than the ceiling above. Cisco's 1310720 was sized against the historic
+# 20480 default and buys nothing here.
+opflex_mcast_sysctl_settings:
+  - {name: "net.ipv4.igmp_max_memberships", value: 4096}
+  - {name: "net.core.optmem_max", value: "KOLLA_UNSET"}
+
+# OpFlex proxy on the leaf. This is an anycast address out of the fabric's
+# infrastructure TEP pool, not an APIC management address.
+opflex_peer_host: "10.0.0.30"
+opflex_peer_port: 8009
+
+# Anycast VXLAN tunnel endpoint of the fabric, also out of the TEP pool.
+opflex_remote_ip: "10.0.0.32"
+opflex_remote_port: 8472
+
+# The policy domain this agent reports to the fabric in its send_identity, and
+# the single most unforgiving setting here.
+#
+# It is the DN of the OVS LOGICAL SWITCH (hvsLNode) that APIC creates under the
+# VMM controller - the controller DN plus "/sw-InsiemeLSOid" - NOT the bare
+# compCtrlr DN. The ODev field APIC fills from this string is lNodeDn, a logical
+# *node* reference, and Cisco's own agent defaults to the same shape (see
+# agent-ovs/cmd/test/policy_repo_stress.cpp: "comp/prov-OpenStack/
+# ctrlr-[stress]-stress/sw-InsiemeLSOid").
+#
+# Sending the bare controller DN gets you a fully successful TLS handshake and
+# then "EINVENTORY: EINVENTORY" on send_identity forever, because APIC cannot
+# resolve a logical switch at that DN: the opflexODev is created with
+# devType=unknown, domName="" and vmmCtrlrPKey="uni/vmmp-VMware/dom-/ctrlr-",
+# raising fault F0214 "Missing Valid Interface for Associated Domain" and, most
+# confusingly, the leaf then never receives vmmDomP at all, so its own log says
+# "Dropping PEp as vmmDomPMo ... is not available on leaf". Diagnosed 2026-08-31
+# on compute-2 after this cost weeks of chasing fabric topology.
+#
+# Cross-check the controller half with "moquery -c compCtrlr" on APIC, or
+# "aimctl manager vmm-controller-list"; confirm the logical switch itself with
+# "moquery -c hvsLNode" (dn ends in /sw-InsiemeLSOid).
+opflex_domain: "comp/prov-OpenStack/ctrlr-[{{ aci_vmm_domain_name | default('openstack') }}]-{{ aci_vmm_controller_name | default(aci_vmm_domain_name | default('openstack')) }}/sw-InsiemeLSOid"
+
+# Unique name for this agent within the policy domain.
+opflex_agent_name: "{{ ansible_facts.nodename }}"
+
+# Uplinks the APIC host agent runs LLDP against to discover which leaf and port
+# this node is cabled to. What it finds becomes the AIM HostLink.
+#
+# These must be PHYSICAL ports. LLDP is exchanged per link, so a bond has no
+# neighbour of its own - "lldpctl -f keyvalue bond2" returns nothing at all
+# while the same command against a member returns the full chassis and port
+# description. Nor is it the infrastructure VLAN sub-interface, since LLDP is
+# untagged on the port itself. This defaults to the uplink's bond members and
+# falls back to the uplink itself when it is not a bond.
+#
+# Getting this wrong fails silently: the agent only discards interfaces that
+# fail ip_lib.device_exists(), so a bond passes that check, lldpctl runs and
+# returns nothing, and the agent reports no topology while logging no error and
+# staying healthy on its RabbitMQ connection.
+#
+# NOTE the replace('-', '_'): Ansible normalises interface names in fact keys,
+# so an uplink named "bond-ext" is ansible_facts["bond_ext"]. Without this the
+# lookup misses, the expression falls back to the bond name itself, and the
+# agent silently reports no topology - which is exactly the failure this
+# variable exists to prevent. (Dots are NOT replaced: bond-ext.3914 is
+# ansible_facts["bond_ext.3914"].)
+opflex_host_agent_uplink_ports: "{{ (ansible_facts.get(opflex_uplink_interface | replace('-', '_'), {}).get('slaves', []) or [opflex_uplink_interface]) | join(',') }}"
+opflex_host_agent_poll_interval: 60
+opflex_host_agent_report_interval: 60
+
+opflex_ssl_mode: "encrypted"
+opflex_ssl_ca_store: "/etc/ssl/certs/"
+
+# Unix socket the agent's inspector listens on, which "gbp_inspect" queries to
+# dump resolved policy. The default matches the binary's compiled-in
+# LOCALSTATEDIR path (agent-ovs/lib/Agent.cpp DEF_INSPECT_SOCKET) so gbp_inspect
+# works without --socket. That directory does not exist in the image, so the
+# container creates it from its config.json before the agent starts; the agent
+# aborts rather than degrades when it cannot bind here.
+opflex_agent_ovs_inspector_enabled: true
+opflex_agent_ovs_inspector_socket: "/usr/local/var/run/opflex-agent-inspect.sock"
+
+# The published agent-ovs binaries are linked without libunbound or libcap-ng even
+# though the OpenvSwitch renderer calls ub_* for its DNS cache and capng_* to drop
+# capabilities, and the opflex_agent executable pulls in neither. dlopen of the
+# renderer then fails on the first missing symbol and the agent carries on with no
+# renderer at all - it resolves policy from the fabric and programs nothing into
+# OVS, which looks like a healthy agent and a dead datapath. Preloading puts the
+# symbols in the global scope before the plugin is loaded. The library is already
+# in the image, so this costs nothing. Set to "" once the published binaries link
+# libunbound and libcap-ng themselves. "ldd -r" on the plugin lists exactly two
+# external symbol families, ub_* and capng_*; every other unresolved symbol is
+# an opflexagent::* one that resolves from the executable at dlopen.
+# Runtime directory agent-ovs looks in for OVS' unix sockets - the OVSDB socket
+# and the OpenFlow management sockets of the bridges it programs. It resolves
+# them through OVS' own ovs_rundir(), which falls back to the rundir compiled
+# into the OVS libraries: for these binaries that is under /usr/local/var, which
+# does not exist here. Without this the agent starts, loads its renderer and
+# then fails every OVSDB connection and stats request, so it looks alive while
+# programming nothing. OVS_RUNDIR is the documented override and has to match
+# where the role mounts the host's /run/openvswitch.
+opflex_agent_ovs_rundir: "/run/openvswitch"
+
+opflex_agent_ovs_libdir: "/usr/lib/{{ 'powerpc64le-linux-gnu' if ansible_facts.architecture == 'ppc64le' else ansible_facts.architecture ~ '-linux-gnu' }}"
+opflex_agent_ovs_ld_preload: "{{ opflex_agent_ovs_libdir }}/libunbound.so.8 {{ opflex_agent_ovs_libdir }}/libcap-ng.so.0"
+
+# OVS bridges. This is a three bridge topology and the two agents name the
+# bridges from opposite ends, which is easy to get backwards:
+#
+#   br-int     nova/os-vif plugs the instance tap here, and it is
+#              neutron-opflex-agent's [OVS] integration_bridge.
+#   br-fabric  the OpFlex dataplane, created by neutron-opflex-agent from
+#              [OPFLEX] fabric_bridge. This is the bridge AGENT-OVS must be
+#              told is its "integration" bridge.
+#
+# neutron-opflex-agent joins the two with a patch pair (ovs_manager.py
+# add_patch_ports) and writes the endpoint file accordingly:
+#
+#   "interface-name":           qpi<port>  -> on br-fabric   (agent-ovs int)
+#   "access-interface":         tap<port>  -> on br-int      (agent-ovs access)
+#   "access-uplink-interface":  qpf<port>  -> on br-int      (agent-ovs access)
+#
+# Note ovs_manager unpacks that pair as "port_f, port_i" while the helper
+# returns (qpi, qpf), so the names read backwards in the source: qpf lands on
+# br-int and qpi on br-fabric.
+#
+# Pointing agent-ovs at br-int instead makes its port mapper unable to resolve
+# any endpoint's interface-name. Everything still looks healthy - flows are
+# programmed, the port is ACTIVE, the endpoint file is correct - but anything
+# that has to transmit out of an endpoint port silently does nothing, because
+# the lookup returns OFPP_NONE and the caller just skips. IPv6 router
+# advertisements are the visible casualty: AdvertManager logs "Sending all
+# router advertisements" but never "Sent router advertisement for <epg>", and
+# instances get no SLAAC address.
+opflex_integration_bridge: "br-int"
+opflex_fabric_bridge: "br-fabric"
+# agent-ovs enforces security groups on the bridge holding the instance tap,
+# which in this topology is br-int.
+opflex_access_bridge_default: "br-access"
+opflex_access_bridge: "{{ opflex_integration_bridge }}"
+
+# OVS tunnel port carrying the VXLAN encapsulated fabric traffic. agent-ovs
+# looks this port up by name and never creates it, so the opflex role does.
+# It belongs on agent-ovs's integration bridge, i.e. the fabric bridge.
+#
+# NOTE: must be <= 15 characters. Linux caps interface names at IFNAMSIZ-1, so
+# a longer name is accepted by OVSDB but reported truncated over OpenFlow -
+# "br-fabric_vxlan0" (16) appears as "br-fabric_vxlan". agent-ovs resolves this
+# port by name through the OpenFlow port mapper, so the lookup then fails, no
+# flow ever outputs to the tunnel, and the port sits at rx_packets=0
+# tx_packets=0 while local delivery still works. Nothing logs an error: the
+# agent programs everything else, endpoints register over the OpFlex control
+# channel, and instances get their addresses from the locally generated RA -
+# only traffic to the fabric silently goes nowhere.
+opflex_encap_interface: "fabric_vxlan0"
+
+# Interface presented to OVS for VLAN encapsulated "local external"
+# endpoints, used by VLAN provider networks. Leave it empty unless those are
+# in use: when set it must be the physical uplink and it is added as a port
+# on the fabric bridge, alongside - not instead of - the VXLAN tunnel.
+#
+# VXLAN encapsulation only. Under opflex_encap_mode "vlan" it is ignored: the
+# template derives uplink-native-iface from opflex_uplink_interface, which is
+# already the encap-iface and already a port on the fabric bridge, so there is
+# no second interface to present.
+opflex_uplink_native_interface: ""
+
+# Physical networks this agent will bind VLAN segments on. apic_aim refuses
+# a VLAN segment whose physical network is absent from the list the agent
+# reports, so leaving this empty keeps the agent OpFlex only. Setting it
+# also requires the fabric side: a physical domain with a VLAN pool, a
+# host-domain mapping, and host links for the uplink.
+opflex_vlan_networks: ""
+
+########################
+# OpFlex ML2 type driver
+########################
+# Physical networks on which the opflex type driver may allocate segments,
+# rendered into [ml2_type_opflex] on the controllers.
+opflex_ml2_networks: "*"
+
+# VLAN ranges backing VLAN provider networks and the dynamic segments
+# apic_aim allocates for SR-IOV and non-OpFlex hosts, rendered into
+# [ml2_type_vlan] network_vlan_ranges. It has to agree with the VLAN pool
+# bound to the physical domain on APIC. Empty means no VLAN segments can be
+# allocated at all.
+opflex_vlan_ranges: ""
+
+# GENEVE tunnel ports agent-ovs clones dropped and logged packets out of, one
+# per bridge it manages. The renderer's "drop-log" block names them and
+# IntFlowManager/AccessFlowManager resolve them by name through the OpenFlow
+# port mapper, exactly like the VXLAN tunnel port above, so the same 15
+# character IFNAMSIZ limit applies and the opflex role has to create them.
+#
+# Without them agent-ovs leaves dropLogIntIface/dropLogAccessIface empty, which
+# is not a soft failure: handleDropLogPortUpdate clears the whole EXP_DROP
+# table and logs "Ignoring dropLog port", and startPacketLogger returns at
+# "DropLog interfaces not configured" without binding its listener. The permit
+# and deny logging the Neutron logging API turns on is emitted as a cloned
+# packet resubmitted into that table (ActionBuilder::permitLog), so it is then
+# discarded with nothing logged anywhere.
+opflex_drop_log_int_interface: "droplog_gen0"
+opflex_drop_log_access_interface: "droplog_gen1"
+
+# Where the packets cloned into those tunnels are sent. agent-ovs hardcodes the
+# listener address to 127.0.0.1 (LOOPBACK in ovs/OVSRenderer.cpp), so only the
+# port is ours to choose. The flows carry the destination address only, so the
+# UDP destination port is whatever the tunnel interface encapsulates with.
+#
+# These two ports MUST DIFFER, and the tunnel port is deliberately left at the
+# GENEVE default rather than pointed straight at the listener. Creating an OVS
+# tunnel vport makes the kernel open a UDP tunnel socket on that port: the
+# existing VXLAN tunnel is why "ss -uln" on a compute shows 0.0.0.0:8472 and a
+# vxlan_sys_8472 netdev. Give the drop-log tunnel the listener's port and the
+# kernel takes 0.0.0.0:50000 first, so PacketLogHandler's bind to
+# 127.0.0.1:50000 fails with EADDRINUSE and every cloned packet is instead
+# received by the kernel geneve device and pushed back into the bridge it came
+# from. That is why Cisco's drop_logs.md keeps the tunnel on 6081 and adds a
+# NAT rule: the DNAT is what steers the packet to userspace before the kernel
+# tunnel socket can claim it, and it is load-bearing, not a convenience.
+opflex_drop_log_tunnel_port: 6081
+opflex_drop_log_local_port: 50000
+
+# Rate limit applied to the drop-log tunnel interfaces, in kbps and kb. These
+# are the values Cisco's drop_logs.md sets on the same ports, and they are the
+# only volume control in the whole path: agent-ovs does NO rate limiting of its
+# own. KeyedRateLimiter exists in the tree but is only used by NotifServer, and
+# maxOutstandingEvents bounds the packet-event exporter queue rather than the
+# log line, which is written before that check. Without policing here, a host
+# taking a scan logs every dropped packet at LOG(INFO) with nothing upstream to
+# slow it down.
+#
+# The agent does filter content: PacketLogHandler prunes LLDP, IGMP, ICMPv6 and
+# mDNS multicast by default, and drop-log-pruning in the config file below can
+# add 5-tuple filters.
+opflex_drop_log_policing_rate: 1000
+opflex_drop_log_policing_burst: 100
+
+# Host-wide drop logging. This is the ONLY packet logging that works on the
+# OpFlex path, and it is deliberately a separate switch from
+# enable_neutron_packet_logging.
+#
+# Per-security-group logging cannot work here. Both the permit and the per-rule
+# deny paths need PolicyRule::log, which is set only when a gbp:LogAction
+# resolves in the policy the agent receives, and APIC does not render one for
+# OpFlex-attached endpoints - verified on this estate with
+# "gbp_inspect -q GbpLogAction" returning nothing while every GbpSecGroupRule
+# was present. Cisco documents the same limitation as "Permit Logging is not
+# supported".
+#
+# What does work needs nothing from the fabric. A Neutron security group is an
+# allow-list, so denied traffic is a table MISS, and the priority-0
+# dropLog(table) flows that punt misses to EXP_DROP are always present. Setting
+# drop-log-enable adds one priority-2 flow in table 0 that stamps the DROP_LOG
+# metadata bit, which is what the catch flow matches on. That is the whole
+# mechanism, and it is host-wide rather than per group.
+opflex_drop_log_enable: false
+
+# Where agent-ovs watches for *.droplogcfg, inside the container. Node-local:
+# per-security-group logging now travels the OpFlex policy path as
+# hostprotRule.action, so nothing off-box writes here and no shared storage is
+# involved. The directory still has to exist because drop-log-config-sources
+# is declared unconditionally in the agent config.
+# Deliberately NOT under opflex_agent_ovs_state_dir: both agent containers
+# declare that whole directory in their kolla "directories" block with
+# recurse: true, so kolla_set_configs chowns it to opflex:opflex 0755 as root
+# on every container start. With the drop-log directory bound in from the host
+# that recursion walks straight out onto the shared storage and strips the
+# access neutron-server needs to write the file in the first place. Keeping the
+# watch directory on its own path puts it outside that recursion.
+opflex_drop_log_watch_dir: "/var/lib/opflex-drop-log"
+
+# The two tunnels above as the opflex role creates them, paired with the bridge
+# each one belongs to. The access tunnel is dropped when opflex_access_bridge is
+# empty, matching the renderer config, which omits access-br-iface in that case
+# because agent-ovs never starts an access bridge to put it on.
+opflex_drop_log_tunnels: >-
+  {{ [{'bridge': opflex_fabric_bridge,
+       'port': opflex_drop_log_int_interface,
+       'options': [{'key': 'remote_ip', 'value': 'flow'},
+                   {'key': 'key', 'value': '1'},
+                   {'key': 'dst_port', 'value': opflex_drop_log_tunnel_port | string}]}]
+     + ([{'bridge': opflex_access_bridge,
+          'port': opflex_drop_log_access_interface,
+          'options': [{'key': 'remote_ip', 'value': 'flow'},
+                      {'key': 'key', 'value': '2'},
+                      {'key': 'dst_port', 'value': opflex_drop_log_tunnel_port | string}]}]
+        if opflex_access_bridge | length > 0 else []) }}
+
+# oslo.messaging listener pool for the keystone notifications apic_aim consumes
+# (identity.project.* -> AIM tenant names, and the optional project purge).
+# With no pool the driver joins the shared topic queue named after the topic
+# itself -- notifications.info -- where it competes with every other consumer
+# of that topic, ceilometer's notification agent being the usual one. RabbitMQ
+# hands each message to exactly ONE consumer on a queue, so both sides silently
+# miss events in proportion to the number of competing consumers. Naming a pool
+# makes oslo.messaging declare a separate queue, so apic_aim and ceilometer each
+# see the full stream. Set to "" to restore the old shared-queue behaviour.
+opflex_keystone_notification_pool: "neutron_keystone"
+
+# Unix socket agent-ovs publishes endpoint state changes on, and that
+# neutron-opflex-agent connects to in order to learn an endpoint has been
+# programmed - that is what makes it report the port up, which is the
+# network-vif-plugged event nova waits for before resuming the paused guest.
+#
+# Both defaults are wrong for us and in two different ways. agent-ovs defaults
+# to its compiled-in LOCALSTATEDIR path, /usr/local/var/run/opflex-agent-notif.sock
+# (agent-ovs/lib/Agent.cpp DEF_NOTIF_SOCKET), while neutron-opflex-agent defaults
+# to /var/run/opflex-agent-notif.sock (opflexagent/config.py). Even were the paths
+# equal, /var/run is private to each container, so the listener could never see
+# the socket the publisher bound. Pin both sides here, under the state directory
+# that is already a named volume shared by the two containers.
+#
+# Left unset, every instance reaches ACTIVE in neutron but stays paused in
+# libvirt until nova gives up with InstanceEventTimeout after vif_plugging_timeout
+# and tears the domain down, and the endpoints/ directory stays empty.
+opflex_agent_ovs_notif_socket: "{{ opflex_agent_ovs_state_dir }}/notif/opflex-agent-notif.sock"
+
+# Whether agent-ovs sends IPv6 Router Advertisements for the bridge domain
+# subnet, i.e. whether it acts as the SLAAC default router for instances.
+#
+# agent-ovs defaults forwarding.virtual-router.enabled to true but
+# forwarding.virtual-router.ipv6.router-advertisement to FALSE
+# (ovs/OVSRenderer.cpp setProperties). Note the OVSRenderer constructor
+# initialises routerAdv(true), so reading the constructor alone is misleading -
+# the property default is what applies whenever the key is absent, and it is
+# false. The agent then answers neighbour solicitations but never advertises a
+# router, so an instance on a slaac subnet only ever configures a link-local
+# address, gets no default route, and systemd-networkd-wait-online fails. There
+# is no error anywhere: neutron shows the port ACTIVE with its allocated
+# address, the endpoint file is correct, and the RS packets even hit the
+# icmp_type=133 flow - the reply simply is never generated.
+#
+# Turn it on: this deployment is IPv6-only, so without RAs no instance can
+# reach the network at all.
+opflex_agent_ovs_router_advertisement: true
+
+opflex_agent_ovs_config_dir: "/etc/opflex-agent-ovs/conf.d"
+opflex_agent_ovs_state_dir: "/var/lib/opflex-agent-ovs"
+opflex_agent_ovs_log_level: "info"

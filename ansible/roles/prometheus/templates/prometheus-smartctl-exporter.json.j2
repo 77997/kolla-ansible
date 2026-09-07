@@ -1,0 +1,12 @@
+{
+    "command": "/opt/smartctl_exporter/smartctl_exporter --web.listen-address={{ api_interface_address | put_address_in_context('url') }}:{{ prometheus_smartctl_exporter_port }}{% if prometheus_smartctl_exporter_cmdline_extras %} {{ prometheus_smartctl_exporter_cmdline_extras }}{% endif %}",
+    "config_files": [
+        {% if kolla_copy_ca_into_containers | bool %}
+        {
+            "source": "{{ container_config_directory }}/ca-certificates",
+            "dest": "/var/lib/kolla/share/ca-certificates",
+            "owner": "root",
+            "perm": "0644"
+        }{% endif %}
+    ]
+}

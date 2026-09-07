@@ -1,9 +1,21 @@
 #jinja2: trim_blocks: False
 include "/etc/rndc.key";
+{% set listen_v4 = [] %}
+{% set listen_v6 = [] %}
+{% set _ = (listen_v6 if api_address_family == 'ipv6' else listen_v4).append('api' | kolla_address) %}
+{% if api_interface != dns_interface %}
+{% set _ = (listen_v6 if dns_address_family == 'ipv6' else listen_v4).append('dns' | kolla_address) %}
+{% endif %}
 options {
-        listen-on port {{ designate_bind_port }} { {{ 'api' | kolla_address }}; };
-        {% if api_interface != dns_interface %}
-        listen-on port {{ designate_bind_port }} { {{ 'dns' | kolla_address }}; };
+        {% if listen_v4 %}
+        listen-on port {{ designate_bind_port }} { {{ listen_v4 | join('; ') }}; };
+        {% else %}
+        listen-on { none; };
+        {% endif %}
+        {% if listen_v6 %}
+        listen-on-v6 port {{ designate_bind_port }} { {{ listen_v6 | join('; ') }}; };
+        {% else %}
+        listen-on-v6 { none; };
         {% endif %}
         directory       "/var/lib/named";
         allow-new-zones yes;

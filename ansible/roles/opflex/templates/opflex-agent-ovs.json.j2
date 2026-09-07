@@ -1,0 +1,44 @@
+{
+    "command": "opflex_agent --watch --config {{ opflex_agent_ovs_config_dir }} --log /var/log/kolla/opflex/opflex-agent-ovs.log",
+    "config_files": [
+        {
+            "source": "{{ container_config_directory }}/opflex-agent-ovs.conf",
+            "dest": "{{ opflex_agent_ovs_config_dir }}/10-opflex-agent-ovs.conf",
+            "owner": "opflex",
+            "perm": "0600"
+        },
+{#      NOTE: this is what actually turns drop logging on. It is shipped
+        unconditionally, with drop-log-enable false when the feature is off,
+        rather than added and removed: FSPacketDropLogConfigSource watches the
+        directory, so deleting the file is a valid "off" too, but a file that is
+        always present and always parsed makes the state visible on the host and
+        lets kolla_set_configs --check restart the container when the value
+        changes. #}
+        {
+            "source": "{{ container_config_directory }}/openstack.droplogcfg",
+            "dest": "{{ opflex_drop_log_watch_dir }}/openstack.droplogcfg",
+            "owner": "opflex",
+            "perm": "0644"
+        }
+    ],
+    "directories": [
+        {
+            "path": "/var/log/kolla/opflex",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": true
+        },
+        {
+            "path": "{{ opflex_agent_ovs_state_dir }}",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": true
+        },
+        {
+            "path": "{{ opflex_agent_ovs_inspector_socket | dirname }}",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": false
+        }
+    ]
+}

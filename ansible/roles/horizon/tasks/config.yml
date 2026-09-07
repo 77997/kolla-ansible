@@ -66,6 +66,24 @@
   when:
     - service | service_enabled_and_mapped_to_host
 
+- name: Reading the host's timezone
+  vars:
+    service: "{{ horizon_services['horizon'] }}"
+  ansible.builtin.stat:
+    path: /etc/localtime
+  register: horizon_host_localtime
+  when: service | service_enabled_and_mapped_to_host
+
+- name: Checking the host's timezone names a zone
+  vars:
+    service: "{{ horizon_services['horizon'] }}"
+  ansible.builtin.assert:
+    that:
+      - horizon_host_localtime.stat.islnk
+      - horizon_host_localtime.stat.lnk_source is match('/usr/share/zoneinfo/.+')
+    fail_msg: "/etc/localtime on {{ inventory_hostname }} is not a link into /usr/share/zoneinfo, so Horizon has no zone name for TIME_ZONE"
+  when: service | service_enabled_and_mapped_to_host
+
 - name: Copying over kolla-settings.py
   become: true
   vars:

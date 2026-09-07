@@ -76,6 +76,16 @@ network
 compute
 manila-share
 
+[lldpd:children]
+network
+compute
+
+[opflex:children]
+compute
+
+[aci-aim:children]
+control
+
 [cinder:children]
 control
 
@@ -544,6 +554,13 @@ monitoring
 
 [prometheus-libvirt-exporter:children]
 compute
+
+[prometheus-smartctl-exporter:children]
+monitoring
+control
+compute
+network
+storage
 
 [prometheus-openstack-network-exporter:children]
 compute

@@ -1,0 +1,11 @@
+---
+fixes:
+  - |
+    With Keystone federation enabled, uWSGI behind ``keystone-httpd`` now
+    listens on the loopback address of the API network's family, ``[::1]``
+    when ``api_address_family`` is ``ipv6`` and ``127.0.0.1`` otherwise, and
+    ``keystone-httpd`` proxies to that same address, set by the new
+    ``keystone_wsgi_socket_host``. uWSGI used to listen on ``127.0.0.1`` alone
+    while ``keystone-httpd`` proxied to ``localhost``, which resolves to
+    ``::1`` alone on a host with no IPv4 address but loopback, so every
+    request to Keystone failed with 503.

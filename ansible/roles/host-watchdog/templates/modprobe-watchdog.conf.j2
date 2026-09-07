@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+#
+# The chipset watchdog would register before ipmi_watchdog and take
+# /dev/watchdog0, which systemd feeds, in place of the BMC watchdog.
+blacklist iTCO_wdt

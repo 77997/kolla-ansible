@@ -14,7 +14,7 @@
       ansible.builtin.fail:
         msg: >-
           Unable to find settings for {{ nova_cell_name or 'the default cell' }}.
-      when: not nova_cell_settings
+      when: nova_cell_settings | length == 0
 
     # TODO(yoctozepto): no need to do --by-service if ironic not used
     - name: Discover nova hosts

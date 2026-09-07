@@ -1,0 +1,18 @@
+---
+features:
+  - |
+    ``kolla-ansible bootstrap-servers`` can now arm the BMC watchdog of the
+    compute hosts, so that the BMC resets a host whose systemd stops running.
+    Set ``enable_host_watchdog`` to ``true`` to enable it; it is disabled by
+    default. The new ``host-watchdog`` role, which runs on the ``compute``
+    group under the ``host-watchdog`` tag, sets ``IPMI_WATCHDOG=yes`` in
+    ``/etc/default/openipmi`` so that the openipmi service loads
+    ``ipmi_watchdog`` at boot, and has systemd feed it with
+    ``RuntimeWatchdogSec``, set by ``host_watchdog_runtime_watchdog_sec``
+    (``10min`` by default, which leaves a kernel crash dump time to be
+    written). On x86_64 hosts it also blacklists the chipset watchdog
+    ``iTCO_wdt``, which would otherwise take ``/dev/watchdog0``, and, when
+    that blacklist changes, rebuilds the initramfs of the running kernel.
+    The role fails when openipmi is not installed or its service is not
+    enabled. Nothing is applied to the running host:
+    the watchdog takes effect at the host's next boot.

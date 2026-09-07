@@ -1,0 +1,14 @@
+---
+features:
+  - |
+    Skyline Console now offers one Single Sign-On (SSO) option for each
+    Keystone identity provider with the openid protocol, labelled with its
+    ``public_name``, which takes the user straight to that identity provider
+    rather than to the federation module's provider selection page. The
+    sign-in links point at the public Keystone endpoint, set by the new
+    ``skyline_sso_keystone_url`` variable (``{{ keystone_public_url }}/v3/``
+    by default), while skyline-apiserver keeps calling Keystone at
+    ``skyline_keystone_url``. Both need a skyline-apiserver image that
+    carries the ``sso_identity_providers`` and ``sso_keystone_url``
+    options; an image without them ignores the two settings and keeps its
+    previous links.
