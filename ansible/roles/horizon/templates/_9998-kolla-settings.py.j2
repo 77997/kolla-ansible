@@ -165,7 +165,7 @@ OPENSTACK_ENDPOINT_TYPE = "internalURL"
 API_RESULT_LIMIT = 1000
 API_RESULT_PAGE_SIZE = 20
 DROPDOWN_MAX_ITEMS = 30
-TIME_ZONE = "UTC"
+TIME_ZONE = "{{ horizon_host_localtime.stat.lnk_source | regex_replace('^/usr/share/zoneinfo/', '') }}"
 POLICY_FILES_PATH = '/etc/openstack-dashboard'
 
 {% if horizon_custom_themes | length > 0 %}

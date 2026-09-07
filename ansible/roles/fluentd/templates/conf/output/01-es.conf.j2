@@ -38,6 +38,9 @@
 {%     endif %}
          flush_interval 15s
          chunk_limit_size {{ fluentd_buffer_chunk_limit_size }}
+{% if fluentd_buffer_total_limit_size %}
+         total_limit_size {{ fluentd_buffer_total_limit_size }}
+{% endif %}
        </buffer>
     </store>
 </match>

@@ -1,0 +1,35 @@
+# {{ ansible_managed }}
+#
+# POWER8 KVM-HV runs guests in whole-core mode: qemu refuses to start a vCPU
+# unless every secondary thread of the core is offline, failing with
+#   "VCPU can only run on primary threads with all secondary threads offline"
+# so an SMT-enabled POWER8 host cannot run any instance.
+#
+# This deliberately does NOT use the smt-enabled=off kernel parameter. That
+# parameter leaves the secondary threads parked in OPAL while they remain in
+# cpu_present_mask, so powernv's subcore_init() -> set_subcores_per_core(1)
+# sends a reschedule IPI to CPUs that never entered Linux and then spins
+# forever inside stop_machine():
+#   for_each_present_cpu(cpu) { while (per_cpu(split_state, cpu).step
+#                                      < SYNC_STEP_FINISHED) barrier(); }
+# Every online CPU is parked in the stop-machine handler at that point, so the
+# host hangs mid-boot with no console output and no panic. The parameter has
+# been known-broken on powernv since 2014 and upstream's own fix was to delete
+# it; the deletion never merged, so it is still present and still hangs.
+# Setting SMT from userspace after boot is the supported mechanism.
+
+[Unit]
+Description=Disable SMT for POWER8 KVM whole-core mode (kolla-ansible)
+Documentation=https://linuxppc-dev.ozlabs.narkive.com/gmJxBMRz/patch-2-0-4-powerpc-don-t-mess-with-smt-at-boot-time
+ConditionArchitecture=ppc64-le
+ConditionPathExists={{ nova_compute_ppc64_cpu_path }}
+After=local-fs.target
+Before={{ kolla_container_engine }}.service libvirtd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ nova_compute_ppc64_cpu_path }} --smt=off
+
+[Install]
+WantedBy=multi-user.target

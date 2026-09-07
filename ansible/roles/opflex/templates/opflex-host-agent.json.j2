@@ -1,0 +1,39 @@
+{
+    "command": "neutron-cisco-apic-host-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/apic_topology_agent.ini --log-file /var/log/kolla/opflex/apic-host-agent.log",
+    "config_files": [
+        {
+            "source": "{{ container_config_directory }}/neutron.conf",
+            "dest": "/etc/neutron/neutron.conf",
+            "owner": "opflex",
+            "perm": "0600"
+        },
+        {
+            "source": "{{ container_config_directory }}/apic_topology_agent.ini",
+            "dest": "/etc/neutron/apic_topology_agent.ini",
+            "owner": "opflex",
+            "perm": "0600"
+        }
+    ],
+{# NOTE: no rootwrap filters are mounted here any more, and /etc/neutron/rootwrap.d
+   no longer needs creating. The image now installs upstream's own
+   etc/cisco-apic.filters and etc/gbp-opflex.filters into that directory at build
+   time (see docker/opflex/opflex-agent/Dockerfile.j2 in the kolla fork), which is
+   where upstream's debian/install and rpm spec put them. cisco-apic.filters is a
+   strict superset of the single lldpctl line this role used to hand-maintain, so
+   do not reintroduce a template here - it would duplicate a file the image
+   already carries, under a third filename. #}
+    "directories": [
+        {
+            "path": "/var/log/kolla/opflex",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": true
+        },
+        {
+            "path": "{{ opflex_agent_ovs_state_dir }}/tmp",
+            "owner": "opflex:opflex",
+            "perm": "0755",
+            "recurse": false
+        }
+    ]
+}

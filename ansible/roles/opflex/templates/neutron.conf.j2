@@ -1,0 +1,38 @@
+{# NOTE: neutron-opflex-agent is an L2 agent, so this carries only what such an
+   agent needs: messaging, logging and locking. The neutron role's template is
+   deliberately not reused - its variables live in that role's defaults and are
+   out of scope here, and most of what it emits (database credentials,
+   keystone_authtoken, service_plugins) belongs to neutron-server rather than to
+   an agent on a compute node. Every variable below is globally scoped, so the
+   messaging configuration stays identical to the rest of the deployment; that
+   matters, because a mismatch on the quorum-queue settings leaves the agent
+   unable to consume from the queues neutron-server declares. #}
+# neutron.conf
+[DEFAULT]
+debug = {{ openstack_logging_debug }}
+log_dir = /var/log/kolla/opflex
+transport_url = {{ rpc_transport_url }}
+
+[oslo_concurrency]
+lock_path = {{ opflex_agent_ovs_state_dir }}/tmp
+
+[agent]
+root_helper = sudo neutron-rootwrap /etc/neutron/rootwrap.conf
+
+[oslo_messaging_notifications]
+transport_url = {{ notify_transport_url }}
+driver = noop
+
+[oslo_messaging_rabbit]
+use_queue_manager = true
+heartbeat_in_pthread = false
+{% if om_enable_rabbitmq_tls | bool %}
+ssl = true
+ssl_ca_file = {{ om_rabbitmq_cacert }}
+{% endif %}
+rabbit_quorum_queue = true
+{% if om_enable_rabbitmq_stream_fanout | bool %}
+rabbit_stream_fanout = true
+rabbit_qos_prefetch_count = {{ om_rabbitmq_qos_prefetch_count }}
+{% endif %}
+rabbit_transient_quorum_queue = true

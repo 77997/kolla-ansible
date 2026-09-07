@@ -1,0 +1,20 @@
+---
+- name: Running AIM config replace
+  vars:
+    service: "{{ aci_aim_services['aci-aim-aid'] }}"
+  become: true
+  kolla_container:
+    action: "start_container"
+    common_options: "{{ docker_common_options }}"
+    detach: false
+    environment:
+      KOLLA_BOOTSTRAP:
+      KOLLA_CONFIG_STRATEGY: "{{ config_strategy }}"
+    image: "{{ service.image }}"
+    labels:
+      BOOTSTRAP:
+    name: "bootstrap_aci_aim"
+    restart_policy: oneshot
+    volumes: "{{ service.volumes | reject('equalto', '') | list }}"
+  run_once: true
+  delegate_to: "{{ groups['aci-aim'][0] }}"

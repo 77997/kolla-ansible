@@ -27,13 +27,6 @@
             "recurse": true
         },
 {% endfor %}
-{% if enable_fluentd_systemd | bool %}
-        {
-            "path": "/var/log/journal",
-            "owner": "fluentd:fluentd",
-            "recurse": true
-        },
-{% endif %}
         {
             "path": "/var/lib/fluentd/data",
             "owner": "fluentd:fluentd",
