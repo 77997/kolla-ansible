@@ -1,0 +1,41 @@
+[OPFLEX]
+# NOTE: agent-ovs watches these two directories for the endpoint and service
+# files this agent writes, so both sides are driven off the same variable.
+epg_mapping_dir = {{ opflex_agent_ovs_state_dir }}/endpoints/
+as_mapping_dir = {{ opflex_agent_ovs_state_dir }}/services/
+# NOTE: must match opflex.notif.socket-name in the agent-ovs config; neither
+# side's default is reachable from the other. See opflex_agent_ovs_notif_socket.
+opflex_notify_socket_path = {{ opflex_agent_ovs_notif_socket }}
+opflex_networks = *
+# NOTE: always emitted, even empty. vlan_networks is a ListOpt defaulting to
+# ['*'], which the agent normalises to None and reports as "any VLAN physnet" -
+# apic_aim reads that None and skips its physnet check altogether. So omitting
+# the key means the opposite of leaving it empty: an empty assignment parses to
+# [], which the agent reports verbatim and apic_aim then matches every physnet
+# against, refusing them all.
+vlan_networks = {{ opflex_vlan_networks }}
+# NOTE: this node already runs kolla's own neutron_metadata_agent. Upstream's
+# AsMetadataManager otherwise starts a second one as a supervisord child, with
+# no metadata_agent.ini behind it - no nova_metadata_host, no shared secret -
+# bound to /var/lib/neutron/metadata_proxy, while kolla's serves
+# /var/lib/neutron/kolla/metadata_proxy. This is upstream's own option for
+# declining the proxy on a node that already has one: it drops the
+# [program:metadata-agent] block and stops as_create() writing the per-VRF
+# .proxy files, leaving supervisord running the ep- and state-watchers.
+# It became load-bearing the moment the image gained the supervisor package.
+# Revisit it, and reconcile the two socket paths, before ever turning on
+# ml2_apic_aim.enable_optimized_metadata.
+disable_metadata_proxy = True
+agent_mode = opflex
+# NOTE: the bridge this agent creates for the OpFlex dataplane and patches
+# br-int to. agent-ovs is pointed at the same bridge as its int-bridge-name.
+fabric_bridge = {{ opflex_fabric_bridge }}
+
+[OVS]
+integration_bridge = {{ opflex_integration_bridge }}
+local_ip = {{ tunnel_interface_address }}
+datapath_type = {{ ovs_datapath }}
+
+[AGENT]
+polling_interval = 2
+report_interval = 60

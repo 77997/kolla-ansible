@@ -1,0 +1,50 @@
+---
+- name: Creating APIC domains from the AIM configuration
+  vars:
+    service: "{{ aci_aim_services['aci-aim-aid'] }}"
+  become: true
+  kolla_container:
+    action: "start_container"
+    common_options: "{{ docker_common_options }}"
+    detach: false
+    environment:
+      KOLLA_CONFIG_STRATEGY: "{{ config_strategy }}"
+    image: "{{ service.image }}"
+    labels:
+      BOOTSTRAP:
+    name: "bootstrap_aci_aim_infra"
+    restart_policy: oneshot
+    volumes: "{{ service.volumes | reject('equalto', '') | list }}"
+    command: >
+      bash -c 'sudo -E kolla_set_configs &&
+      aimctl -c /etc/aim/aim.conf infra create'
+  run_once: true
+  delegate_to: "{{ groups['aci-aim'][0] }}"
+  when: aci_aim_create_apic_domains | bool
+
+- name: Loading APIC domains into AIM
+  vars:
+    service: "{{ aci_aim_services['aci-aim-aid'] }}"
+  become: true
+  kolla_container:
+    action: "start_container"
+    common_options: "{{ docker_common_options }}"
+    detach: false
+    environment:
+      KOLLA_CONFIG_STRATEGY: "{{ config_strategy }}"
+    image: "{{ service.image }}"
+    labels:
+      BOOTSTRAP:
+    name: "bootstrap_aci_aim_domains"
+    restart_policy: oneshot
+    volumes: "{{ service.volumes | reject('equalto', '') | list }}"
+    command: >
+      bash -c 'sudo -E kolla_set_configs &&
+      aimctl -c /etc/aim/aim.conf manager load-domains &&
+      if ! aimctl -c /etc/aim/aim.conf manager vmm-domain-find --type OpenStack
+      --name {{ aci_vmm_domain_name }} --plain | grep -qw "{{ aci_vmm_domain_name }}"; then
+      echo "AIM holds no OpenStack VMM domain {{ aci_vmm_domain_name }} after load-domains:
+      check the [apic_vmdom:{{ aci_vmm_domain_name }}] section of aim.conf" >&2; exit 1; fi'
+  run_once: true
+  delegate_to: "{{ groups['aci-aim'][0] }}"
+  when: aci_aim_load_domains | bool

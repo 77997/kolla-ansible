@@ -1,0 +1,138 @@
+{
+    "log": {
+        "level": "{{ opflex_agent_ovs_log_level }}"
+    },
+    "opflex": {
+        "domain": "{{ opflex_domain }}",
+        "name": "{{ opflex_agent_name }}",
+        "peers": [
+            {
+                "hostname": "{{ opflex_peer_host }}",
+                "port": {{ opflex_peer_port }}
+            }
+        ],
+        "ssl": {
+            "mode": "{{ opflex_ssl_mode }}",
+            "ca-store": "{{ opflex_ssl_ca_store }}"
+        },
+        "inspector": {
+            "enabled": {{ 'true' if opflex_agent_ovs_inspector_enabled | bool else 'false' }},
+            "socket-name": "{{ opflex_agent_ovs_inspector_socket }}"
+        },
+        "notif": {
+            "enabled": true,
+            "socket-name": "{{ opflex_agent_ovs_notif_socket }}"
+        }
+    },
+    "endpoint-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/endpoints"]
+    },
+    "service-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/services"]
+    },
+    "snat-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/snats"]
+    },
+    "drop-log-config-sources": {
+        "filesystem": ["{{ opflex_drop_log_watch_dir }}"]
+    },
+    "out-of-band-config-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/outofband"]
+    },
+    "host-agent-fault-sources": {
+        "filesystem": ["{{ opflex_agent_ovs_state_dir }}/faults"]
+    },
+    "plugins": {
+        "renderer": ["libopflex_agent_renderer_openvswitch.so"]
+    },
+    "renderers": {
+        "stitched-mode": {
+            "int-bridge-name": "{{ opflex_fabric_bridge }}",
+            "access-bridge-name": "{{ opflex_access_bridge }}",
+            "encap": {
+{% if opflex_encap_mode == 'vxlan' %}
+                "vxlan": {
+                    "encap-iface": "{{ opflex_encap_interface }}",
+                    "uplink-iface": "{{ opflex_uplink_vlan_interface }}",
+                    "uplink-vlan": {{ opflex_infra_vlan }},
+{%     if opflex_uplink_native_interface | length > 0 %}
+                    "uplink-native-iface": "{{ opflex_uplink_native_interface }}",
+{%     endif %}
+                    "remote-ip": "{{ opflex_remote_ip }}",
+                    "remote-port": {{ opflex_remote_port }}
+                }
+{% else %}
+{#     NOTE: uplink-iface is where agent-ovs reads the MAC it puts in the OpFlex
+       Identity Request when the encapsulation is VLAN. OVSRenderer::start()
+       calls getInterfaceMac(uplinkIface) and only then Agent::setUplinkMac,
+       which is what reaches framework.setTunnelMac. With the key absent
+       uplinkIface stays empty, the MAC is sent as zeroes, and the fabric
+       answers that with a PlatformConfig delete that makes the agent restart
+       the connection - upstream added the call in 6a36c63e and the parse of
+       this key in 6c7fbb4f. Note 6a36c63e's commit message names encap-iface;
+       the code reads uplinkIface.
+
+       The physical uplink is used rather than the infrastructure VLAN
+       sub-interface because getInterfaceMac ioctls a kernel netdev by name:
+       a VLAN sub-interface inherits its parent's MAC, so the two are the same
+       address, but only opflex_uplink_interface is checked to exist outside
+       VXLAN mode. #}
+{#     NOTE: uplink-native-iface is the "local external" / SVI uplink. It is
+       the sole input to IntFlowManager::uplinkIface (ovs/OVSRenderer.cpp:147)
+       and so to getUplinkPort() (ovs/IntFlowManager.cpp:273-275), which gates
+       the only bucket that outputs local-external traffic to the uplink
+       (ovs/IntFlowManager.cpp:6322-6339). Omitted, setUplinkIface refuses the
+       empty string (ovs/IntFlowManager.cpp:265-269) and that whole path is
+       dead behind a single startup ERROR line.
+
+       All three VLAN keys name the one physical uplink, which is what Cisco's
+       own reference config shows (plugin-renderer-openvswitch.conf.in:34-35
+       and :50-52, both "team0"). They are three different lookups of it:
+       encap-iface and uplink-native-iface are OVS ports resolved through the
+       port mapper, uplink-iface is a kernel netdev read with SIOCGIFHWADDR.
+       Aliasing them is safe - createStaticFlows emits the same priority-50
+       SEC entry for tunPort and uplinkPort (ovs/IntFlowManager.cpp:5522-5533)
+       and TableState::apply keys by (priority, match) and keeps only the last
+       (ovs/TableState.cpp:349-361, :424-433). #}
+                "vlan": {
+                    "encap-iface": "{{ opflex_uplink_interface }}",
+                    "uplink-iface": "{{ opflex_uplink_interface }}",
+                    "uplink-native-iface": "{{ opflex_uplink_interface }}"
+                }
+{% endif %}
+            },
+{% if enable_neutron_packet_logging | default(false) | bool %}
+{#     NOTE: this has to live in the same renderer block as the encapsulation
+       above, not in a second file of its own. agent-ovs applies every .conf in
+       conf.d by calling Agent::setProperties once per file, and that method
+       creates one Renderer per key found under "renderers" that is not already
+       instantiated. The openvswitch plugin registers itself under BOTH
+       "stitched-mode" and "openvswitch" (OVSRendererPlugin::getNames), so a
+       second file keyed "openvswitch" does not merge into this renderer - it
+       starts a SECOND OVSRenderer driving the same two bridges. #}
+            "drop-log": {
+                "geneve": {
+                    "int-br-iface": "{{ opflex_drop_log_int_interface }}",
+{%     if opflex_access_bridge | length > 0 %}
+                    "access-br-iface": "{{ opflex_drop_log_access_interface }}",
+{%     endif %}
+                    "remote-ip": "127.0.0.1",
+                    "remote-port": {{ opflex_drop_log_tunnel_port }},
+                    "local-port": {{ opflex_drop_log_local_port }}
+                }
+            },
+{% endif %}
+            "forwarding": {
+                "virtual-router": {
+                    "enabled": true,
+                    "ipv6": {
+                        "router-advertisement": {{ 'true' if opflex_agent_ovs_router_advertisement | bool else 'false' }}
+                    }
+                }
+            },
+            "flowid-cache-dir": "{{ opflex_agent_ovs_state_dir }}/ids",
+            "mcast-group-file": "{{ opflex_agent_ovs_state_dir }}/mcast/opflex-groups.json",
+            "dns-cache-dir": "{{ opflex_agent_ovs_state_dir }}/dns"
+        }
+    }
+}

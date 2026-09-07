@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-bind = "{{ api_interface_address }}:{{ skyline_apiserver_port }}"
+bind = "{{ api_interface_address | put_address_in_context('url') }}:{{ skyline_apiserver_port }}"
 workers = {{ skyline_gunicorn_workers }}
 worker_class = "uvicorn.workers.UvicornWorker"
 timeout = {{ skyline_gunicorn_timeout }}

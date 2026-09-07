@@ -1,0 +1,219 @@
+---
+# Host-level prerequisites for OpFlex in VXLAN encapsulation mode. Both halves
+# of the fabric multicast path live here: the route that lets BUM traffic leave,
+# and the socket limits that bound how many flood groups can be joined.
+#
+# Sources for everything asserted below are upstream, not this repository:
+#   - OVS creates the tunnel netdev as vxlan_sys_<dst_port> and explicitly sets
+#     IFLA_VXLAN_COLLECT_METADATA=1 and IFLA_VXLAN_LEARNING=0
+#     (openvswitch lib/dpif-netlink-rtnl.c, lib/netdev-vport.c).
+#   - In that mode vxlan_xmit() bypasses the FDB entirely and takes the outer
+#     destination from the flow's tun_dst, then performs an unconditional
+#     ip_route_output_key() with oif=0 and saddr=0. A FIB miss returns
+#     -ENETUNREACH, which the driver books as tx_carrier_errors
+#     (linux drivers/net/vxlan/vxlan_core.c, net/ipv4/udp_tunnel_core.c).
+#     The routing table is therefore the only thing that can resolve a group
+#     address for this device: it holds no multicast membership of its own,
+#     because OVS never gives it a group/dev pair.
+#   - agent-ovs puts the endpoint group's GbpeInstContext multicastGroupIP into
+#     MFF_TUN_DST for BUM traffic and never touches host routing or any
+#     transmit-side socket option (opflex agent-ovs/ovs/IntFlowManager.cpp).
+#   - Cisco requires this exact route on every OpFlex VXLAN host and installs it
+#     from the provisioning layer on every platform they support, e.g.
+#     aci-containers pkg/hostagent/opflex.go, which runs
+#     "ip route add 224.0.0.0/4 dev <iface> proto static scope link metric 401".
+#     kolla-ansible is the provisioning layer here, so it is ours to install.
+
+- name: Locate the networkd configuration of the infrastructure VLAN interface
+  become: true
+  ansible.builtin.shell:
+    cmd: >-
+      sed -n 's/^NETWORK_FILE=//p'
+      "/run/systemd/netif/links/$(cat /sys/class/net/{{ opflex_uplink_vlan_interface }}/ifindex)"
+  register: opflex_uplink_vlan_network_file
+  changed_when: false
+  failed_when: false
+
+# NOTE: this is asserted rather than skipped on purpose. The runtime route below
+# is added either way, so a host with no persistence works until it reboots and
+# then fails silently, back to the original outage with no log and no alarm -
+# the failure mode this whole file exists to remove. Set
+# opflex_mcast_route_persist to false to take that on deliberately.
+
+- name: Checking the OpFlex multicast route can be persisted
+  ansible.builtin.assert:
+    that:
+      - opflex_uplink_vlan_network_file.stdout | trim is match('^/etc/systemd/network/.+[.]network$')
+    fail_msg: >-
+      The multicast route needed for OpFlex VXLAN cannot be persisted on
+      {{ inventory_hostname }}.
+      {% if opflex_uplink_vlan_network_file.stdout | trim | length == 0 %}
+      systemd-networkd does not manage "{{ opflex_uplink_vlan_interface }}".
+      {% else %}
+      networkd matches it against
+      "{{ opflex_uplink_vlan_network_file.stdout | trim }}", which is outside
+      /etc/systemd/network - a drop-in beside it would be read-only or lost on
+      reboot. Copy that file into /etc/systemd/network first.
+      {% endif %}
+      Add "{{ opflex_mcast_route_destination }}" on
+      {{ opflex_uplink_vlan_interface }} through whatever configures this host's
+      networking, or set opflex_mcast_route_persist to false to accept that the
+      route is lost on reboot.
+  when: opflex_mcast_route_persist | bool
+
+# NOTE: written as a drop-in beside the .network file that already claims the
+# interface, because that file belongs to the operator - the bond, the VLAN and
+# the DHCP client that carries the TEP are all configured outside kolla-ansible.
+# A second .network matching the same link would not merge with it; networkd
+# applies exactly one .network per link, so it would replace the operator's
+# configuration rather than add to it.
+
+- name: Create the networkd drop-in directory for the OpFlex multicast route
+  become: true
+  ansible.builtin.file:
+    path: "{{ opflex_uplink_vlan_network_file.stdout | trim }}.d"
+    state: directory
+    mode: "0755"
+  when: opflex_mcast_route_persist | bool
+
+- name: Persist the OpFlex multicast route
+  become: true
+  ansible.builtin.copy:
+    content: |
+      # Written by kolla-ansible. See roles/opflex/tasks/config-host.yml.
+      [Route]
+      Destination={{ opflex_mcast_route_destination }}
+      Scope=link
+      Metric={{ opflex_mcast_route_metric }}
+    dest: "{{ opflex_uplink_vlan_network_file.stdout | trim }}.d/10-opflex-multicast.conf"
+    mode: "0644"
+  when: opflex_mcast_route_persist | bool
+
+# NOTE: the drop-in outlives the setting that created it. Turning
+# opflex_mcast_route_persist off, or moving opflex_uplink_interface to a
+# different uplink, otherwise leaves a file beside the old .network that keeps
+# installing the route on every boot with no task that owns it - and on a
+# repointed uplink it installs the route on the wrong interface. Both are found
+# by name rather than by guessing the previous path, and the one this run is
+# meant to keep is excluded by comparing against the path written above.
+
+- name: Find OpFlex multicast route drop-ins
+  become: true
+  ansible.builtin.find:
+    paths: /etc/systemd/network
+    patterns: 10-opflex-multicast.conf
+    recurse: true
+    file_type: file
+  register: opflex_mcast_dropins
+
+- name: Remove OpFlex multicast route drop-ins this host should not carry
+  become: true
+  vars:
+    wanted: "{{ opflex_uplink_vlan_network_file.stdout | trim }}.d/10-opflex-multicast.conf"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ opflex_mcast_dropins.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: not (opflex_mcast_route_persist | bool) or item.path != wanted
+
+# NOTE: the drop-in only takes effect the next time networkd configures the
+# link. Reloading it here to force that would reconfigure the interface and
+# re-run DHCP on the tunnel endpoint, dropping the OpFlex session with it, so
+# the route is added directly as well and the drop-in is left to carry it across
+# a reboot or a networkd restart.
+#
+# To be clear about what does and does not threaten the runtime route: networkd
+# removes routes it does not manage in link_drop_unmanaged_routes(), which is
+# reached only from link_configure() - networkd start or restart,
+# "networkctl reconfigure", or a reload in which the matched .network actually
+# changed (systemd networkd-link.c). A DHCPv4 lease renewal does NOT reach it;
+# the renew path calls dhcp_lease_renew() and the lease-lost path ends by
+# re-requesting static routes (systemd networkd-dhcp4.c). So the runtime route
+# survives normal operation, and the drop-in is what covers restart and reboot.
+
+- name: Check for the OpFlex multicast route
+  ansible.builtin.command:
+    cmd: >-
+      ip -4 route show {{ opflex_mcast_route_destination }}
+      dev {{ opflex_uplink_vlan_interface }}
+  register: opflex_mcast_route
+  changed_when: false
+
+- name: Add the OpFlex multicast route
+  become: true
+  changed_when: true
+  ansible.builtin.command:
+    cmd: >-
+      ip route replace {{ opflex_mcast_route_destination }}
+      dev {{ opflex_uplink_vlan_interface }}
+      proto static scope link metric {{ opflex_mcast_route_metric }}
+  when: opflex_mcast_route.stdout_lines
+        | select('search', 'proto static')
+        | select('search', 'metric ' ~ opflex_mcast_route_metric ~ '($|\\s)')
+        | list | length == 0
+
+# NOTE: the route is added before the stale ones are removed so it is never
+# absent, even briefly. Removal is needed at all because metric is part of the
+# routing key: after a change to opflex_mcast_route_metric or
+# _destination, "ip route replace" installs a second route rather than
+# replacing the one that differs, and the host would keep a route the drop-in
+# no longer describes.
+#
+# Metric is therefore the ONLY thing this may key on, and the asymmetry with the
+# add task above is deliberate. proto is not part of the routing key, so a route
+# that already sits at the configured metric under a different proto is replaced
+# in place by the add task rather than duplicated - the add task still tests it,
+# because that is what normalises proto to static and matches the drop-in. If
+# this loop tested it too, that host would take the add and then delete what the
+# add had just installed: the loop iterates the pre-add snapshot, so the stale
+# line still reads as proto-less, and its metric is the metric now in use. The
+# result is no multicast route at all, on a deploy that reports success, which
+# is the exact failure mode this file exists to remove.
+#
+# A route printed with no metric is metric 0, and that is stated explicitly
+# rather than left off the command: "ip route del" treats a missing metric as a
+# wildcard (fc_priority 0 in fib_table_delete) and would match the lowest-metric
+# entry, which after the add above may be the route being protected.
+
+- name: Remove OpFlex multicast routes that do not match the configured shape
+  become: true
+  changed_when: true
+  vars:
+    stale_metric: "{{ (item | regex_search('metric (\\d+)', '\\1') or ['0']) | first }}"
+  ansible.builtin.command:
+    cmd: >-
+      ip route del {{ opflex_mcast_route_destination }}
+      dev {{ opflex_uplink_vlan_interface }}
+      metric {{ stale_metric }}
+  loop: "{{ opflex_mcast_route.stdout_lines }}"
+  when: item is not search('metric ' ~ opflex_mcast_route_metric ~ '($|\\s)')
+
+# NOTE: mcast_daemon holds one IGMP membership per flood group the fabric hands
+# out, so net.ipv4.igmp_max_memberships is a hard ceiling on how many bridge
+# domains an OpFlex compute can receive BUM traffic for. Past the limit the
+# joins simply fail while the OpFlex session, policy resolution and every
+# container healthcheck stay green - the same silent shape as the transmit-side
+# failure above. Cisco ships these in their RPM
+# (opflex agent-ovs/rpm/90-opflex-agent-sysctl.conf) and applies them in %post,
+# but their Debian packaging and container image install nothing, so a
+# container deployment on a Debian-family host runs at the kernel default of 20.
+# Only optmem_max accompanies it here: each membership is allocated with
+# sock_kmalloc against that budget, whereas the wmem/rmem maxima Cisco also
+# ships are not on the join path.
+
+- name: Setting sysctl values for OpFlex multicast
+  become: true
+  vars:
+    should_set: "{{ item.value != 'KOLLA_UNSET' }}"
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    state: "{{ should_set | ternary('present', 'absent') }}"
+    value: "{{ should_set | ternary(item.value, omit) }}"
+    sysctl_set: "{{ should_set }}"
+    sysctl_file: "{{ kolla_sysctl_conf_path }}"
+  with_items: "{{ opflex_mcast_sysctl_settings }}"
+  when:
+    - set_sysctl | bool
+    - item.value != 'KOLLA_SKIP'

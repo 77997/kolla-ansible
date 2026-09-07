@@ -170,7 +170,7 @@ class DockerWorker(ContainerWorker):
         if exec_inspect['ExitCode'] == 0:
             return False
         elif exec_inspect['ExitCode'] == 1:
-            self._config_diff = (output.decode('utf-8') if
+            self._config_diff = (output.decode('utf-8', errors='replace') if
                                  isinstance(output, bytes) else output)
             return True
         elif exec_inspect['ExitCode'] == 137:

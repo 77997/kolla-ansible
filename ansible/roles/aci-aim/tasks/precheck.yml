@@ -1,0 +1,87 @@
+---
+- name: Precheck AIM configuration
+  ansible.builtin.import_role:
+    name: service-precheck
+  vars:
+    service_precheck_services: "{{ aci_aim_services }}"
+    service_name: "{{ project_name }}"
+
+- name: Checking APIC connection parameters
+  ansible.builtin.assert:
+    that:
+      - aci_apic_hosts | length > 0
+      - aci_apic_username | length > 0
+      - aci_apic_password | length > 0
+    fail_msg: >-
+      aci_apic_hosts, aci_apic_username and aci_apic_password must all be
+      set when neutron_plugin_agent is "aci".
+  run_once: true
+
+- name: Checking APIC VMM domain name
+  ansible.builtin.assert:
+    that: aci_vmm_domain_name | length > 0
+    fail_msg: >-
+      aci_vmm_domain_name must be set to the name of the OpenStack VMM
+      domain when aci_aim_load_domains or aci_aim_create_apic_domains is
+      enabled.
+  run_once: true
+  when: aci_aim_load_domains | bool or aci_aim_create_apic_domains | bool
+
+- name: Checking APIC VMM domain encapsulation mode
+  ansible.builtin.assert:
+    that: aci_vmm_encap_mode in ['vlan', 'vxlan']
+    fail_msg: >-
+      aci_vmm_encap_mode must be either "vlan" or "vxlan", not
+      "{{ aci_vmm_encap_mode }}".
+  run_once: true
+  when: aci_vmm_domain_name | length > 0
+
+- name: Checking APIC VMM domain VLAN pool
+  ansible.builtin.assert:
+    that: aci_vmm_vlan_ranges | length > 0
+    fail_msg: >-
+      aci_vmm_vlan_ranges must list at least one <vlan_min>:<vlan_max>
+      range for a VLAN encapsulated VMM domain, as the domain is created
+      with no VLAN namespace otherwise.
+  run_once: true
+  when:
+    - aci_aim_create_apic_domains | bool
+    - aci_vmm_encap_mode == 'vlan'
+
+- name: Checking APIC VMM domain multicast pool
+  ansible.builtin.assert:
+    that:
+      - aci_vmm_mcast_ranges | length > 0
+      - aci_vmm_multicast_address | length > 0
+    fail_msg: >-
+      aci_vmm_mcast_ranges and aci_vmm_multicast_address must be set for a
+      VXLAN encapsulated VMM domain, and must not collide with the pools of
+      any other VMM domain on the fabric.
+  run_once: true
+  when:
+    - aci_aim_create_apic_domains | bool
+    - aci_vmm_encap_mode == 'vxlan'
+
+- name: Checking APIC VMM domain credentials
+  ansible.builtin.assert:
+    that:
+      - aci_vmm_openstack_user | length > 0
+      - aci_vmm_openstack_password | length > 0
+    fail_msg: >-
+      aci_vmm_openstack_user and aci_vmm_openstack_password must be set
+      when creating APIC domains, as they are written to the VMM domain
+      user account on the fabric.
+  run_once: true
+  when: aci_aim_create_apic_domains | bool
+
+- name: Checking APIC attachable entity profile
+  ansible.builtin.assert:
+    that: aci_apic_entity_profile | length > 0
+    fail_msg: >-
+      aci_apic_entity_profile must name the existing AEP of the OpFlex
+      hosts when aci_apic_provision_infra is disabled, otherwise the VMM
+      domain is created without being attached to any AEP.
+  run_once: true
+  when:
+    - aci_aim_create_apic_domains | bool
+    - not aci_apic_provision_infra | bool

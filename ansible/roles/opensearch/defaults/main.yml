@@ -39,7 +39,16 @@ opensearch_services:
         auth_user: "{{ opensearch_dashboards_user }}"
         auth_pass: "{{ opensearch_dashboards_password }}"
         backend_http_extra:
-          - "option httpchk GET /api/status"
+          # NOTE: send an explicit Host header. OpenSearch Dashboards builds the
+          # request URL from server.info.uri, which derives from server.host --
+          # a bare address. When that address is IPv6 the resulting
+          # "http://2602:db8::1:5601" is not a valid URL, so any request WITHOUT
+          # a Host header raises TypeError [ERR_INVALID_URL] and returns 500.
+          # "option httpchk <meth> <uri>" sends HTTP/1.0 with no Host header, so
+          # the check fails, the backend is marked DOWN, and deploy aborts at
+          # "Wait for OpenSearch Dashboards API to become ready" with a 503.
+          - "option httpchk"
+          - "http-check send meth GET uri /api/status hdr Host localhost"
       opensearch_dashboards_external:
         enabled: "{{ enable_opensearch_dashboards_external | bool }}"
         mode: "http"
@@ -50,7 +59,16 @@ opensearch_services:
         auth_user: "{{ opensearch_dashboards_user }}"
         auth_pass: "{{ opensearch_dashboards_password }}"
         backend_http_extra:
-          - "option httpchk  GET /api/status"
+          # NOTE: send an explicit Host header. OpenSearch Dashboards builds the
+          # request URL from server.info.uri, which derives from server.host --
+          # a bare address. When that address is IPv6 the resulting
+          # "http://2602:db8::1:5601" is not a valid URL, so any request WITHOUT
+          # a Host header raises TypeError [ERR_INVALID_URL] and returns 500.
+          # "option httpchk <meth> <uri>" sends HTTP/1.0 with no Host header, so
+          # the check fails, the backend is marked DOWN, and deploy aborts at
+          # "Wait for OpenSearch Dashboards API to become ready" with a 503.
+          - "option httpchk"
+          - "http-check send meth GET uri /api/status hdr Host localhost"
 
 
 ####################

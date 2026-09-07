@@ -97,6 +97,16 @@ network
 compute
 manila-share
 
+[lldpd:children]
+network
+compute
+
+[opflex:children]
+compute
+
+[aci-aim:children]
+control
+
 [cinder:children]
 control
 

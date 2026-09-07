@@ -77,7 +77,13 @@
       failed_when:
         - nova_cell0_updated.rc != 0
       when:
-        - nova_cell_settings | bool
+        # NOTE: test the dict's length, not "| bool" and not bare truthiness.
+        # "| bool" coerces any dict to False, so the task would never run and a
+        # changed cell database connection would silently never be applied. A
+        # bare dict has the right truthiness but is not a boolean, which
+        # ansible-core 2.19 rejects: "Conditional result (True) was derived
+        # from value of type 'dict'".
+        - nova_cell_settings | length > 0
         - nova_cell_settings.cell_database != nova_cell0_connection
 
 - name: Include tasks from bootstrap_service.yml

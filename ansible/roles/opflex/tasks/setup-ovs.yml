@@ -1,0 +1,485 @@
+---
+- name: Create br-int bridge on OpenvSwitch
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_integration_bridge }}"
+      state: present
+      fail_mode: secure
+
+- name: Set br-int datapath type to netdev for DPDK
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Bridge
+      record: "{{ opflex_integration_bridge }}"
+      col: datapath_type
+      value: netdev
+  when: enable_ovs_dpdk | bool
+
+# NOTE: the access bridge is where agent-ovs enforces security groups. It is
+# only started when a name is configured, so leaving opflex_access_bridge
+# empty disables both the bridge and that enforcement. The bridge is removed
+# again in that case rather than left behind, so the setting is reversible.
+
+- name: Create the OpFlex access bridge on OpenvSwitch
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_access_bridge }}"
+      state: present
+      fail_mode: secure
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_access_bridge | length > 0
+
+- name: Remove the OpFlex access bridge when disabled
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_access_bridge_default }}"
+      state: absent
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_access_bridge | length == 0
+
+- name: Set the OpFlex access bridge datapath type to netdev for DPDK
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Bridge
+      record: "{{ opflex_access_bridge }}"
+      col: datapath_type
+      value: netdev
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_access_bridge | length > 0
+    - enable_ovs_dpdk | bool
+
+# NOTE: neutron-opflex-agent creates the fabric bridge itself, but agent-ovs
+# and the tunnel port below both need it to exist before either agent starts,
+# and the two containers come up in no guaranteed order.
+
+- name: Create the OpFlex fabric bridge on OpenvSwitch
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_fabric_bridge }}"
+      state: present
+      fail_mode: secure
+  when: inventory_hostname in groups['compute']
+
+- name: Set the OpFlex fabric bridge datapath type to netdev for DPDK
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Bridge
+      record: "{{ opflex_fabric_bridge }}"
+      col: datapath_type
+      value: netdev
+  when:
+    - inventory_hostname in groups['compute']
+    - enable_ovs_dpdk | bool
+
+# NOTE: the previous topology put agent-ovs on br-int and created a separate
+# br-access. Neither is used now: agent-ovs enforces security groups on the
+# bridge holding the tap, which is br-int. Remove the leftover bridge so a
+# node upgraded in place does not keep an orphan.
+
+- name: Remove the obsolete standalone OpFlex access bridge
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ opflex_access_bridge_default }}"
+      state: absent
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_access_bridge != opflex_access_bridge_default
+
+# NOTE: agent-ovs resolves the tunnel port by name through the OVS port
+# mapper and never creates it, so it has to exist before the agent starts.
+# The interface stays in error state between being added and being given its
+# type, which is why the type is set immediately below.
+
+- name: Create the OpFlex VXLAN tunnel port on the fabric bridge
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_port
+    module_args:
+      bridge: "{{ opflex_fabric_bridge }}"
+      port: "{{ opflex_encap_interface }}"
+      state: present
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_encap_mode == 'vxlan'
+
+- name: Set the type of the OpFlex VXLAN tunnel interface
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Interface
+      record: "{{ opflex_encap_interface }}"
+      col: type
+      value: vxlan
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_encap_mode == 'vxlan'
+
+# NOTE: remote_ip and key are flow based. agent-ovs sets the tunnel
+# destination and the VNID per flow from the policy it resolves over OpFlex,
+# so a fixed remote_ip here would break every non-local destination.
+
+- name: Set the options of the OpFlex VXLAN tunnel interface
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Interface
+      record: "{{ opflex_encap_interface }}"
+      col: options
+      key: "{{ item.key }}"
+      value: "{{ item.value }}"
+  loop:
+    - {key: "remote_ip", value: "flow"}
+    - {key: "key", value: "flow"}
+    - {key: "dst_port", value: "{{ opflex_remote_port }}"}
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_encap_mode == 'vxlan'
+
+# NOTE: under VLAN encapsulation there is no tunnel port - the uplink itself
+# is the encap-iface. agent-ovs reads it from the "vlan" block
+# (ovs/OVSRenderer.cpp:440), passes it to intFlowManager.setEncapIface
+# (ovs/OVSRenderer.cpp:146) and resolves it with
+# switchManager.getPortMapper().FindPort(encapIface)
+# (ovs/IntFlowManager.cpp:281-283) against intSwitchManager, which is started
+# on int-bridge-name - the bridge this role maps to opflex_fabric_bridge.
+#
+# Nothing else creates it. The only INSERT into OvsdbTable::PORT anywhere in
+# agent-ovs is the ERSPAN renderer (ovs/SpanRenderer.cpp:275), and
+# neutron-opflex-agent only ever puts endpoint patch halves, the metadata
+# namespace port and SNAT internal ports on this bridge (opflexagent
+# utils/bridge_managers/ovs_manager.py). Without this task the fabric bridge
+# has no leaf-facing port at all in VLAN mode.
+#
+# The failure is silent. FindPort returns OFPP_NONE without logging
+# (ovs/PortMapper.cpp:169-173), and the only encap-iface error agent-ovs ever
+# emits is for an empty config string (ovs/IntFlowManager.cpp:257-262), so
+# every fabric-facing flow is simply skipped: the SEC_TABLE ingress allow
+# (ovs/IntFlowManager.cpp:5522-5526), the per-EPG OUT_TABLE egress
+# (:5808-5830), the flood-group bucket (:6333-6339) and endpoint
+# advertisements (ovs/AdvertManager.cpp:369-370). Policy resolves, endpoints
+# register and the agent reports healthy while nothing reaches the fabric.
+#
+# No "tag" is set: actionTunnelMetadata pushes the EPG's own VLAN with
+# pushVlan then regMove REG0 -> VLAN_VID (ovs/IntFlowManager.cpp:806-813), so
+# this is a plain trunk port. It is the physical parent, never the
+# infrastructure VLAN sub-interface, which stays a kernel netdev outside OVS.
+
+- name: Add the VLAN encapsulation uplink to the OpFlex fabric bridge
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_port
+    module_args:
+      bridge: "{{ opflex_fabric_bridge }}"
+      port: "{{ opflex_uplink_interface }}"
+      state: present
+      external_ids:
+        kolla_opflex_fabric_uplink: "true"
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_encap_mode == 'vlan'
+
+# NOTE: only needed for VLAN provider networks, where agent-ovs tags "local
+# external" endpoints out of the physical uplink. The uplink keeps carrying
+# the infrastructure VLAN sub-interface for the tunnel endpoint, which stays
+# a plain kernel netdev and is deliberately not added here. That only works
+# on the kernel datapath, where the VLAN sub-interface still receives after
+# the parent is enslaved to a bridge. With the netdev datapath OVS takes the
+# device outright and the tunnel endpoint address goes with it, so the two
+# cannot be combined on one interface under DPDK.
+
+# NOTE: the fabric bridge, not the integration bridge. agent-ovs hands this
+# interface to IntFlowManager, which resolves it with
+# switchManager.getPortMapper().FindPort(uplinkIface) against its own
+# switchManager - intSwitchManager, started on int-bridge-name, which this
+# role maps to opflex_fabric_bridge. A port on any other bridge resolves to
+# OFPP_NONE, and createGroupMod then skips the "local external" bucket
+# entirely, so nothing is ever output to the uplink and nothing is logged.
+# This is the same bridge the VXLAN tunnel port above is added to, for the
+# same reason.
+#
+# Skipped under VLAN encapsulation. There the template derives
+# uplink-native-iface from opflex_uplink_interface, which the task above has
+# already put on this bridge, so acting on opflex_uplink_native_interface as
+# well would attach a second interface that the agent never resolves.
+
+- name: Add the native uplink to the OpFlex fabric bridge
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_port
+    module_args:
+      bridge: "{{ opflex_fabric_bridge }}"
+      port: "{{ opflex_uplink_native_interface }}"
+      state: present
+      external_ids:
+        kolla_opflex_fabric_uplink: "true"
+  when:
+    - inventory_hostname in groups['compute']
+    - opflex_uplink_native_interface | length > 0
+    - opflex_encap_mode != 'vlan'
+
+# NOTE: removing the port again matters more than usual here. Leaving a
+# physical interface on the fabric bridge after the setting is cleared would
+# keep OVS attached to the OpFlex uplink, so the setting has to be reversible
+# in both directions.
+#
+# Reversing it means removing whatever was added last time, and once
+# opflex_uplink_native_interface has been cleared - or the encapsulation mode
+# has changed - that name is no longer in the inventory. Both tasks above
+# therefore record themselves in the port's external_ids, and this reaper
+# removes every marked port that the current settings do not ask for.
+#
+# One marker shared by both tasks, not one each. Only ever a single
+# leaf-facing uplink is wanted on this bridge, and a single desired-set is
+# what stops a mode flip in either direction from deleting the port the other
+# mode has just added: a host that ran VXLAN with a native uplink carries the
+# marker on that port, and flipping it to VLAN clears the variable, so a
+# per-task reaper would tear the encap-iface off the bridge on the same play
+# that created it.
+#
+# Removing opflex_uplink_interface unconditionally instead would be wrong
+# twice over: it leaves the interface that was actually added attached, and
+# under VLAN encapsulation opflex_uplink_interface is the encap-iface, which
+# has to stay a port on this bridge.
+
+- name: Find uplinks previously added to the OpFlex fabric bridge
+  become: true
+  ansible.builtin.command:
+    cmd: >-
+      {{ kolla_container_engine }} exec openvswitch_db
+      ovs-vsctl --no-heading --data=bare --columns=name
+      find Port external_ids:kolla_opflex_fabric_uplink=true
+  register: opflex_recorded_fabric_uplinks
+  changed_when: false
+  when: inventory_hostname in groups['compute']
+
+- name: Remove uplinks that are no longer configured
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_port
+    module_args:
+      bridge: "{{ opflex_fabric_bridge }}"
+      port: "{{ item }}"
+      state: absent
+  loop: >-
+    {{ opflex_recorded_fabric_uplinks.stdout_lines | default([]) | map('trim')
+       | reject('equalto', '') | list
+       | difference([opflex_uplink_interface] if opflex_encap_mode == 'vlan'
+                    else ([opflex_uplink_native_interface]
+                          if opflex_uplink_native_interface | length > 0
+                          else [])) }}
+  when: inventory_hostname in groups['compute']
+
+# NOTE: the drop-log tunnels, one per bridge agent-ovs manages: int-br-iface on
+# int-bridge-name (the fabric bridge) and access-br-iface on access-bridge-name.
+# Like the VXLAN tunnel port above, agent-ovs only ever looks these up by name
+# through the OpenFlow port mapper and never creates them, and a name that does
+# not resolve leaves the catch-drop flow unwritten with nothing logged.
+#
+# remote_ip is flow based because the flows set tun_dst themselves. dst_port is
+# left at the GENEVE default and deliberately NOT pointed at the agent's
+# listener - see the drop-log notes in group_vars/all/opflex.yml for why that
+# would stop the listener binding at all. The keys distinguish the two bridges.
+
+- name: Create the OpFlex drop-log tunnel ports
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_port
+    module_args:
+      bridge: "{{ item.bridge }}"
+      port: "{{ item.port }}"
+      state: present
+  loop: "{{ opflex_drop_log_tunnels }}"
+  when:
+    - inventory_hostname in groups['compute']
+    - enable_neutron_packet_logging | default(false) | bool
+
+- name: Set the type of the OpFlex drop-log tunnel interfaces
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Interface
+      record: "{{ item.port }}"
+      col: type
+      value: geneve
+  loop: "{{ opflex_drop_log_tunnels }}"
+  when:
+    - inventory_hostname in groups['compute']
+    - enable_neutron_packet_logging | default(false) | bool
+
+# NOTE: the only rate limit in the entire drop-log path. agent-ovs does none of
+# its own - see the notes in group_vars/all/opflex.yml - so without this an
+# unfiltered drop log on a host under a port scan writes a log line per packet.
+# Cisco's drop_logs.md sets the same two columns on these interfaces.
+#
+# Set with ovs-vsctl rather than the openvswitch_db module: these are integer
+# scalar columns, and the module's value parser regexes the ovs-vsctl output and
+# fails on them with "'NoneType' object has no attribute 'group'". The read-back
+# is what makes this idempotent, so the task only reports changed when it
+# actually changes something.
+
+- name: Rate limit the OpFlex drop-log tunnel interfaces
+  become: true
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      cur=$({{ kolla_container_engine }} exec openvswitch_db
+      ovs-vsctl get Interface {{ item.0.port }} {{ item.1.col }} 2>/dev/null
+      | tr -d '"');
+      if [ "$cur" != "{{ item.1.value }}" ]; then
+      {{ kolla_container_engine }} exec openvswitch_db
+      ovs-vsctl set Interface {{ item.0.port }}
+      {{ item.1.col }}={{ item.1.value }} && echo CHANGED;
+      fi
+    executable: /bin/bash
+  register: opflex_drop_log_policing
+  changed_when: "'CHANGED' in opflex_drop_log_policing.stdout"
+  loop: >-
+    {{ opflex_drop_log_tunnels | product([
+         {'col': 'ingress_policing_rate',
+          'value': opflex_drop_log_policing_rate | string},
+         {'col': 'ingress_policing_burst',
+          'value': opflex_drop_log_policing_burst | string}]) | list }}
+  when:
+    - inventory_hostname in groups['compute']
+    - enable_neutron_packet_logging | default(false) | bool
+
+- name: Set the options of the OpFlex drop-log tunnel interfaces
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_db
+    module_args:
+      table: Interface
+      record: "{{ item.0.port }}"
+      col: options
+      key: "{{ item.1.key }}"
+      value: "{{ item.1.value }}"
+  loop: "{{ opflex_drop_log_tunnels | subelements('options') }}"
+  when:
+    - inventory_hostname in groups['compute']
+    - enable_neutron_packet_logging | default(false) | bool
+
+# NOTE: without this rule the feature cannot work, and it is the step Cisco's
+# drop_logs.md spells out. The clone leaves OVS encapsulated towards 127.0.0.1
+# on the tunnel port, but PacketLogHandler binds 127.0.0.1 on a different port,
+# and the port the tunnel uses is owned by the kernel's own GENEVE socket -
+# created the moment the vport exists, exactly as the VXLAN tunnel already puts
+# 0.0.0.0:8472 in "ss -uln". Undirected, the packet is therefore swallowed by
+# that kernel socket and re-injected into the bridge it was cloned from.
+# Rewriting the destination port on the way out hands it to the agent instead,
+# before the tunnel socket sees it.
+#
+# Scoped to loopback deliberately: Cisco's form matches every locally generated
+# GENEVE packet, which on a host that also runs real GENEVE tunnels would
+# capture traffic that has nothing to do with drop logging.
+#
+# This lives in the running kernel only. It is reapplied on every deploy, but a
+# reboot drops it and nothing here installs a persistence mechanism.
+
+- name: Redirect encapsulated OpFlex drop logs to the agent's listener
+  become: true
+  ansible.builtin.iptables:
+    table: nat
+    chain: OUTPUT
+    protocol: udp
+    destination: "127.0.0.1"
+    destination_port: "{{ opflex_drop_log_tunnel_port }}"
+    jump: DNAT
+    to_destination: "127.0.0.1:{{ opflex_drop_log_local_port }}"
+    comment: "kolla opflex drop-log"
+    state: present
+  when:
+    - inventory_hostname in groups['compute']
+    - enable_neutron_packet_logging | default(false) | bool
+
+- name: Remove the OpFlex drop-log redirect when disabled
+  become: true
+  ansible.builtin.iptables:
+    table: nat
+    chain: OUTPUT
+    protocol: udp
+    destination: "127.0.0.1"
+    destination_port: "{{ opflex_drop_log_tunnel_port }}"
+    jump: DNAT
+    to_destination: "127.0.0.1:{{ opflex_drop_log_local_port }}"
+    comment: "kolla opflex drop-log"
+    state: absent
+  when:
+    - inventory_hostname in groups['compute']
+    - not enable_neutron_packet_logging | default(false) | bool
+
+# NOTE: removed rather than left behind when the feature is turned off, so the
+# setting is reversible the way the access bridge and native uplink above are.
+# A leftover drop-log tunnel is not inert: agent-ovs would keep resolving the
+# port and keep cloning every dropped packet into a listener that is no longer
+# running once the drop-log config leaves the renderer.
+
+- name: Remove the OpFlex drop-log tunnel ports when disabled
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_port
+    module_args:
+      bridge: "{{ item.bridge }}"
+      port: "{{ item.port }}"
+      state: absent
+  loop: "{{ opflex_drop_log_tunnels }}"
+  when:
+    - inventory_hostname in groups['compute']
+    - not enable_neutron_packet_logging | default(false) | bool

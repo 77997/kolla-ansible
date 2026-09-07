@@ -1,0 +1,3 @@
+---
+- name: Deploy OpFlex
+  ansible.builtin.import_tasks: deploy.yml
