@@ -46,12 +46,15 @@
          path /var/lib/fluentd/data/elasticsearch.buffer/{{ item.facility }}.*
          flush_interval 15s
          chunk_limit_size {{ fluentd_buffer_chunk_limit_size }}
+{% if fluentd_buffer_total_limit_size %}
+         total_limit_size {{ fluentd_buffer_total_limit_size }}
+{% endif %}
        </buffer>
   </store>
 {%     elif log_direct_to_opensearch %}
   <store>
        @type opensearch
-       hosts {% for host in groups['opensearch'] %}{{ 'api' | kolla_address(host) }}{% if not loop.last %},{% endif %}{% endfor %}
+       hosts {% for host in groups['opensearch'] %}{{ fluentd_opensearch_scheme }}://{{ 'api' | kolla_address(host) | put_address_in_context('url') }}:{{ opensearch_port }}{% if not loop.last %},{% endif %}{% endfor %}
        port {{ opensearch_port }}
        scheme {{ fluentd_opensearch_scheme }}
 {%         if fluentd_opensearch_path != '' %}
@@ -80,6 +83,9 @@
          path /var/lib/fluentd/data/opensearch.buffer/{{ item.facility }}.*
          flush_interval 15s
          chunk_limit_size {{ fluentd_buffer_chunk_limit_size }}
+{% if fluentd_buffer_total_limit_size %}
+         total_limit_size {{ fluentd_buffer_total_limit_size }}
+{% endif %}
        </buffer>
     </store>
 {%     endif %}

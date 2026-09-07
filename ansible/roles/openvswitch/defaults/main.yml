@@ -10,7 +10,7 @@ openvswitch_services:
       inventory_hostname in groups['compute']
       or (enable_manila_backend_generic | bool and inventory_hostname in groups['manila-share'])
       or inventory_hostname in groups['neutron-dhcp-agent']
-      or inventory_hostname in groups['neutron-l3-agent']
+      or (neutron_plugin_agent not in ['ovn', 'aci'] and inventory_hostname in groups['neutron-l3-agent'])
       or inventory_hostname in groups['neutron-metadata-agent']
       }}
     volumes: "{{ openvswitch_db_default_volumes + openvswitch_db_extra_volumes }}"
@@ -27,7 +27,7 @@ openvswitch_services:
       inventory_hostname in groups['compute']
       or (enable_manila_backend_generic | bool and inventory_hostname in groups['manila-share'])
       or inventory_hostname in groups['neutron-dhcp-agent']
-      or inventory_hostname in groups['neutron-l3-agent']
+      or (neutron_plugin_agent not in ['ovn', 'aci'] and inventory_hostname in groups['neutron-l3-agent'])
       or inventory_hostname in groups['neutron-metadata-agent']
       }}
     privileged: true
@@ -104,3 +104,29 @@ openvswitch_ovs_vsctl_wrapper_enabled: false
 openvswitch_system_id: "{{ ansible_facts.hostname }}"
 openvswitch_hostname: "{{ ansible_facts.fqdn }}"
 openvswitch_hw_offload: "no"
+
+# Under plugin agents that never run neutron-openvswitch-agent -- 'aci' being the
+# case here -- nothing creates the integration bridge. The DHCP agent still runs
+# though, and with no interface_driver configured neutron falls back to the OVS
+# driver, whose integration_bridge defaults to br-int. plug_new() then raises
+# BridgeDoesNotExist on every network, the agent never finishes a sync, and it
+# retries about once a second forever (measured: 1.3M ERROR lines, ~2.6 GB/day of
+# logs). Creating the bridge lets the plug succeed and stops the loop.
+#
+# The bridge is deliberately a dead end: no uplink port and fail_mode=secure, so
+# with no controller programming flows it forwards nothing. Under ACI, DHCP is
+# answered compute-locally by agent-ovs; the dnsmasq instance here never serves a
+# packet. What matters is that the network:dhcp port keeps existing, because
+# apic_aim's rpc.py reads it for dhcp_server_ips and as the dns_nameservers
+# fallback.
+#
+# This is only needed where the DHCP agent actually runs, so the task follows
+# groups['neutron-dhcp-agent'] rather than groups['network']. On a host that is
+# a fabric-attached OpFlex node the opflex role has already built a real br-int
+# and the task is a harmless no-op; on a host that runs no DHCP agent there is
+# nothing to plug and the dead bridge should not be created at all. Note that a
+# dead bridge is not merely wasteful: a network:dhcp port on a host with no
+# OpFlex agent can never bind, and apic_aim reads that unbound port's IP as the
+# dns_nameservers fallback, handing guests a resolver that cannot answer.
+openvswitch_integration_bridge: "{{ neutron_ovs_integration_bridge }}"
+openvswitch_ensure_integration_bridge: "{{ neutron_plugin_agent == 'aci' }}"

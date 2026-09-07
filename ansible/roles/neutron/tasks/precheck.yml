@@ -79,5 +79,32 @@
     fail_msg: "The number of entries in neutron_internal_interface does not match the number of entries in neutron_bridge_name."
   run_once: true
 
+- name: Checking for ACI-incompatible features
+  ansible.builtin.assert:
+    that:
+      - not (enable_neutron_dvr | bool)
+      - not (enable_neutron_bgp_dragent | bool)
+      - not (enable_neutron_agent_ha | bool)
+      - not (enable_neutron_segments | bool)
+      - not (enable_neutron_provider_networks | bool)
+      - not (enable_neutron_mlnx | bool)
+      - not (enable_neutron_infoblox_ipam_agent | bool)
+    fail_msg: >-
+      One or more enabled features cannot work with ACI. The fabric routes
+      and advertises natively, so DVR and BGP dynamic routing have nothing to
+      distribute, and apic_aim_l3 schedules no router to an agent, which also
+      makes L3 agent HA meaningless. apic_aim maps a network to exactly one
+      bridge domain and EPG, so routed provider networks collapse into a
+      single flood domain. Provider networks would build br-ex on the compute
+      nodes and take the OpFlex uplink with it, and no ACI object corresponds
+      to an InfiniBand partition. networking-infoblox is in neither image.
+      Set enable_neutron_dvr, enable_neutron_bgp_dragent,
+      enable_neutron_agent_ha, enable_neutron_segments,
+      enable_neutron_provider_networks, enable_neutron_mlnx and
+      enable_neutron_infoblox_ipam_agent to "no".
+  run_once: true
+  when:
+    - neutron_plugin_agent == 'aci'
+
 - name: Import tasks from neutron_plugin_agent_check.yml
   ansible.builtin.import_tasks: neutron_plugin_agent_check.yml

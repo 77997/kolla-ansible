@@ -467,7 +467,10 @@ prometheus_libvirt_exporter_default_volumes:
 prometheus_openstack_network_exporter_default_volumes:
   - "{{ node_config_directory }}/prometheus-openstack-network-exporter/:{{ container_config_directory }}/:ro"
   - "/etc/localtime:/etc/localtime:ro"
-  - "/run/ovn:/run/ovn:ro"
+  # /run/ovn only exists when OVN is deployed; the OVN collectors are the only
+  # consumers of it. On non-OVN backends (e.g. ACI/opflex, ML2/OVS) the host
+  # path is absent and the bind-mount would prevent the container from starting.
+  - "{{ '/run/ovn:/run/ovn:ro' if neutron_plugin_agent == 'ovn' else '' }}"
   - "/run/openvswitch:/run/openvswitch:ro"
   - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
   - "kolla_logs:/var/log/kolla/"

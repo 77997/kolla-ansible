@@ -548,7 +548,7 @@ class PodmanWorker(ContainerWorker):
         else:
             raise Exception('Failed to compare container configuration: '
                             'ExitCode: %s Message: %s' %
-                            (rc, raw_output.decode('utf-8')))
+                            (rc, raw_output.decode('utf-8', errors='replace')))
 
     def pull_image(self):
         args = self.prepare_image_args()

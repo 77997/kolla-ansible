@@ -33,6 +33,10 @@
       fail_mode: standalone
   loop: "{{ neutron_bridge_name.split(',') }}"
   when:
+    # Under apic_aim there is no OVS agent and no L3 agent to consume an
+    # external bridge -- north-south egress is an ACI L3Out -- so br-ex would
+    # only ever be an empty bridge holding an idle NIC.
+    - neutron_plugin_agent != 'aci'
     - inventory_hostname in groups["network"]
       or (inventory_hostname in groups["compute"] and computes_need_external_bridge | bool )
 
@@ -49,5 +53,22 @@
     - "{{ neutron_bridge_name.split(',') }}"
     - "{{ neutron_external_interface.split(',') }}"
   when:
+    # Under apic_aim there is no OVS agent and no L3 agent to consume an
+    # external bridge -- north-south egress is an ACI L3Out -- so br-ex would
+    # only ever be an empty bridge holding an idle NIC.
+    - neutron_plugin_agent != 'aci'
     - inventory_hostname in groups["network"]
       or (inventory_hostname in groups["compute"] and computes_need_external_bridge | bool )
+
+- name: Ensuring OVS integration bridge exists
+  become: true
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    user: root
+    module_name: openvswitch_bridge
+    module_args:
+      bridge: "{{ openvswitch_integration_bridge }}"
+      fail_mode: secure
+  when:
+    - openvswitch_ensure_integration_bridge | bool
+    - inventory_hostname in groups["neutron-dhcp-agent"]

@@ -200,7 +200,7 @@ designate_mdns_enable_healthchecks: "{{ enable_container_healthchecks }}"
 designate_mdns_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
 designate_mdns_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
 designate_mdns_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
-designate_mdns_healthcheck_test: ["CMD-SHELL", "healthcheck_port designate-mdns {{ om_rpc_port }}"]
+designate_mdns_healthcheck_test: ["CMD-SHELL", "healthcheck_listen designate-mdns {{ designate_mdns_port }}"]
 designate_mdns_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
 designate_mdns_healthcheck:
   interval: "{{ designate_mdns_healthcheck_interval }}"
@@ -326,11 +326,11 @@ designate_source_version: "{{ kolla_source_version }}"
 ####################
 ## Designate
 #####################
-designate_dnssec_validation: "yes"
+designate_dnssec_validation: "auto"
 designate_recursion: "no"
 ## Example for designate_forwarders_addresses: "10.199.200.1; 10.199.100.1"
 designate_forwarders_addresses: ""
-designate_backend_bind9_cmdline_extras: "-U {{ designate_backend_bind9_workers }} -g"
+designate_backend_bind9_cmdline_extras: "-g"
 
 ####################
 # Infoblox
